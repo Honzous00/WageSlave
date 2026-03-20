@@ -1,0 +1,9 @@
+# Docházkový systém — závislosti
+# Instalace: pip install -r requirements.txt
+
+# Povinné (pro tray icon a ikonu)
+Pillow>=10.0.0
+pystray>=0.19.0
+
+# Volitelné (pro automatické načtení z Windows Event Logu)
+# pywin32>=306  # pouze Windows, odkomentujte pokud chcete auto-příchod z event logu
