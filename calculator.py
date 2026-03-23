@@ -52,10 +52,21 @@ def week_analysis(records, current_date):
                                 diff -= config.OBED_MINUT
                             skutecne_celkem += max(0, diff)
 
+                    # FIX: use actual elapsed time (ted) for planovane_do_dneska,
+                    # not the fixed STANDARDNI_ODCHOD. This ensures the Friday
+                    # prediction reflects overtime already worked today.
                     if prichod:
-                        plan = (cas_na_minuty(config.STANDARDNI_ODCHOD) - cas_na_minuty(prichod)) \
-                               - (config.OBED_MINUT if obed else 0)
-                        planovane_do_dneska += max(0, plan)
+                        p_dt = datetime.combine(den, datetime.strptime(prichod, "%H:%M").time())
+                        if ted > p_dt:
+                            elapsed = int((ted - p_dt).total_seconds() / 60)
+                            if elapsed > 360 and obed:
+                                elapsed -= config.OBED_MINUT
+                            planovane_do_dneska += max(0, elapsed)
+                        else:
+                            # Haven't started yet — plan a standard day
+                            plan = (cas_na_minuty(config.STANDARDNI_ODCHOD) - cas_na_minuty(prichod)) \
+                                   - (config.OBED_MINUT if obed else 0)
+                            planovane_do_dneska += max(0, plan)
         else:
             if den == current_date:
                 planovane_do_dneska += 8 * 60
@@ -85,7 +96,11 @@ def week_analysis(records, current_date):
                 cas_patek = "--:--"
     else:
         patkovy_fond = max(0, 8 * 60 - rozdil)
-        odchod_min = cas_na_minuty(config.STANDARDNI_PRICHOD) + patkovy_fond + config.OBED_MINUT
+        # FIX: only add lunch on Friday if the remaining work block is long enough
+        # to warrant a break (> 6 hours), matching the same threshold used elsewhere.
+        odchod_min = cas_na_minuty(config.STANDARDNI_PRICHOD) + patkovy_fond
+        if patkovy_fond > 360:
+            odchod_min += config.OBED_MINUT
         if odchod_min < 24 * 60:
             cas_patek = f"{int(odchod_min // 60):02d}:{int(odchod_min % 60):02d}"
         else:
@@ -129,8 +144,11 @@ def month_balance(records, current_date):
             if den < dnes:
                 skutecne_a_planovane += uzavrene_mesic.get(datum_str, 0)
             elif den == dnes:
+                # Add real closed minutes for today (may be 0 if no closed record)
                 skutecne_a_planovane += uzavrene_mesic.get(datum_str, 0)
+
                 if datum_str in otevrene_mesic:
+                    # Still clocked in — estimate live time + planned remainder
                     r = otevrene_mesic[datum_str]
                     prichod = r[1]
                     if prichod:
@@ -147,7 +165,11 @@ def month_balance(records, current_date):
                         if (ted - p_dt).total_seconds() / 60 <= 360:
                             zbyva -= config.OBED_MINUT
                         skutecne_a_planovane += max(0, zbyva)
-                else:
+                elif datum_str not in uzavrene_mesic:
+                    # FIX: only add a planned full day if there is truly NO record
+                    # at all for today (neither open nor closed). If a closed record
+                    # exists it was already added via uzavrene_mesic above — adding
+                    # 480 on top was the bug causing the monthly balance to explode.
                     skutecne_a_planovane += 480
             else:
                 skutecne_a_planovane += 480
