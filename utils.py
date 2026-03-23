@@ -23,13 +23,26 @@ def normalizuj_cas(entry):
     if not text:
         return
     try:
+        h, m = None, None
         if ':' in text:
-            h, m = text.split(':', 1)
-            h, m = int(h), int(m)
-        else:
+            parts = text.split(':', 1)
+            h = int(parts[0])
+            m = int(parts[1]) if parts[1] else 0
+        elif len(text) <= 2:
+            # e.g. "6" → 6:00, "14" → 14:00
             h = int(text)
             m = 0
-        if 0 <= h <= 23 and 0 <= m <= 59:
+        elif len(text) == 3:
+            # e.g. "630" → 6:30
+            h = int(text[0])
+            m = int(text[1:])
+        elif len(text) == 4:
+            # e.g. "0630" → 6:30, "1430" → 14:30
+            h = int(text[:2])
+            m = int(text[2:])
+        else:
+            return
+        if h is not None and m is not None and 0 <= h <= 23 and 0 <= m <= 59:
             entry.delete(0, END)
             entry.insert(0, f"{h:02d}:{m:02d}")
     except Exception:

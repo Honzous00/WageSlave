@@ -196,13 +196,14 @@ class DochazkaApp(tk.Tk):
         self._auto_zapis_prichod()
         self._refresh()
         self.after(30_000, self._tick)
+        self.after(500, self.tray.create)  # create tray after window is ready
 
     # ── WINDOW SETUP ──────────────────────────────────────────────────────────
 
     def _setup_window(self):
         self.title("Docházkový systém")
         self.geometry("1120x720")
-        self.minsize(900, 600)
+        self.resizable(False, False)
         self.configure(bg=C["bg"])
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -388,18 +389,18 @@ class DochazkaApp(tk.Tk):
 
         # Outer padding
         pad = tk.Frame(page, bg=C["bg"])
-        pad.pack(fill="both", expand=True, padx=20, pady=16)
+        pad.pack(fill="both", expand=True, padx=20, pady=10)
 
         # ── ROW 1: Hero cards
         row1 = tk.Frame(pad, bg=C["bg"])
-        row1.pack(fill="x", pady=(0, 12))
+        row1.pack(fill="x", pady=(0, 8))
 
         self._build_pred_card(row1)
         self._build_progress_card(row1)
 
         # ── ROW 2: Stat cards
         row2 = tk.Frame(pad, bg=C["bg"])
-        row2.pack(fill="x", pady=(0, 12))
+        row2.pack(fill="x", pady=(0, 8))
 
         self.stat_celkem = self._build_stat_card(row2, "◎  CELKEM ODPRACOVÁNO", "--", "tento týden")
         self.stat_zbyva  = self._build_stat_card(row2, "◷  ZBÝVÁ DOPRACOVAT",   "--", "do splnění fondu")
@@ -415,7 +416,7 @@ class DochazkaApp(tk.Tk):
     # ── PREDICTION CARD ───────────────────────────────────────────────────────
 
     def _build_pred_card(self, parent):
-        card = tk.Frame(parent, bg=C["panel"], padx=24, pady=22)
+        card = tk.Frame(parent, bg=C["panel"], padx=24, pady=14)
         card.pack(side="left", fill="both", padx=(0, 10))
 
         # Top accent line (canvas trick)
@@ -459,7 +460,7 @@ class DochazkaApp(tk.Tk):
     # ── PROGRESS CARD ─────────────────────────────────────────────────────────
 
     def _build_progress_card(self, parent):
-        card = tk.Frame(parent, bg=C["panel"], padx=24, pady=22)
+        card = tk.Frame(parent, bg=C["panel"], padx=24, pady=14)
         card.pack(side="left", fill="both", expand=True)
 
         # Header row
@@ -495,7 +496,7 @@ class DochazkaApp(tk.Tk):
     # ── STAT CARD ─────────────────────────────────────────────────────────────
 
     def _build_stat_card(self, parent, label, value, sub):
-        card = tk.Frame(parent, bg=C["panel"], padx=20, pady=18)
+        card = tk.Frame(parent, bg=C["panel"], padx=20, pady=12)
         card.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
         tk.Label(card, text=label, bg=C["panel"], fg=C["muted"],
@@ -512,30 +513,31 @@ class DochazkaApp(tk.Tk):
     # ── FORM CARD ─────────────────────────────────────────────────────────────
 
     def _build_form_card(self, parent):
-        card = tk.Frame(parent, bg=C["panel"], padx=18, pady=18, width=340)
-        card.pack(side="left", fill="y", padx=(0, 10))
+        card = tk.Frame(parent, bg=C["panel"], padx=18, pady=14, width=340)
+        card.pack(side="left", fill="both", padx=(0, 10))
         card.pack_propagate(False)
 
         tk.Label(card, text="ZÁZNAM SMĚNY", bg=C["panel"],
                  fg=C["muted"], font=("Consolas", 8),
                  anchor="w").pack(fill="x")
-        Separator(card).pack(fill="x", pady=10)
+        Separator(card).pack(fill="x", pady=8)
 
         # Datum
         tk.Label(card, text="DATUM", bg=C["panel"], fg=C["muted"],
                  font=("Consolas", 7), anchor="w").pack(fill="x")
         self.e_datum = DarkEntry(card)
-        self.e_datum.pack(fill="x", pady=(3, 10), ipady=5)
+        self.e_datum.pack(fill="x", pady=(3, 8), ipady=5)
         self.e_datum.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
 
         # Příchod
         tk.Label(card, text="PŘÍCHOD", bg=C["panel"], fg=C["muted"],
                  font=("Consolas", 7), anchor="w").pack(fill="x")
         pr_row = tk.Frame(card, bg=C["panel"])
-        pr_row.pack(fill="x", pady=(3, 10))
+        pr_row.pack(fill="x", pady=(3, 8))
         self.e_prichod = DarkEntry(pr_row, width=8)
         self.e_prichod.pack(side="left", ipady=5)
         self.e_prichod.bind("<FocusOut>", lambda e: normalizuj_cas(self.e_prichod))
+        self.e_prichod.bind("<Return>", lambda e: normalizuj_cas(self.e_prichod))
         DarkButton(pr_row, text="NOW", accent=True,
                    command=lambda: self._set_now(self.e_prichod),
                    padx=8, pady=4).pack(side="left", padx=(6, 0))
@@ -544,10 +546,11 @@ class DochazkaApp(tk.Tk):
         tk.Label(card, text="ODCHOD", bg=C["panel"], fg=C["muted"],
                  font=("Consolas", 7), anchor="w").pack(fill="x")
         od_row = tk.Frame(card, bg=C["panel"])
-        od_row.pack(fill="x", pady=(3, 10))
+        od_row.pack(fill="x", pady=(3, 8))
         self.e_odchod = DarkEntry(od_row, width=8)
         self.e_odchod.pack(side="left", ipady=5)
         self.e_odchod.bind("<FocusOut>", lambda e: normalizuj_cas(self.e_odchod))
+        self.e_odchod.bind("<Return>", lambda e: normalizuj_cas(self.e_odchod))
         DarkButton(od_row, text="NOW", accent=True,
                    command=lambda: self._set_now(self.e_odchod),
                    padx=8, pady=4).pack(side="left", padx=(6, 0))
@@ -555,7 +558,7 @@ class DochazkaApp(tk.Tk):
         # Oběd checkbox
         self.obed_var = tk.BooleanVar(value=True)
         obed_row = tk.Frame(card, bg=C["panel"])
-        obed_row.pack(fill="x", pady=(0, 14))
+        obed_row.pack(fill="x", pady=(0, 8))
         cb = tk.Checkbutton(obed_row, text=" Odečíst oběd (30 min)",
                             variable=self.obed_var,
                             bg=C["panel"], fg=C["muted"],
@@ -567,18 +570,22 @@ class DochazkaApp(tk.Tk):
                             cursor="hand2")
         cb.pack(anchor="w")
 
-        # Save button
-        self.save_btn = DarkButton(card, text="⊕  Uložit záznam",
+        # Buttons — always at bottom
+        btn_frame = tk.Frame(card, bg=C["panel"])
+        btn_frame.pack(side="bottom", fill="x")
+
+        self.save_btn = DarkButton(btn_frame, text="Uložit záznam",
                                    accent=True,
                                    command=self._save_record)
-        self.save_btn.pack(fill="x", pady=(0, 6))
+        self.save_btn.pack(fill="x")
 
-        # Delete button
-        self.delete_btn = DarkButton(card, text="✕  Smazat vybraný",
+        self.delete_btn = DarkButton(btn_frame, text="Smazat vybraný",
                                      danger=True,
                                      command=self._confirm_delete,
                                      state="disabled")
-        self.delete_btn.pack(fill="x")
+        self.delete_btn.pack(fill="x", pady=(4, 0))
+
+
 
     # ── TABLE CARD ────────────────────────────────────────────────────────────
 
@@ -846,8 +853,24 @@ class DochazkaApp(tk.Tk):
         options = ["Vše"] + [f"Týden {w}" for w in weeks]
         self.week_combo["values"] = options
         cur = self.week_filter_var.get()
+
+        # On first load (still "Vše" default), auto-select current week if available
+        if cur == "Vše" and not hasattr(self, '_table_initialized'):
+            self._table_initialized = True
+            current_week = get_week_number(datetime.date.today())
+            current_week_str = f"Týden {current_week}"
+            if current_week_str in options:
+                self.week_filter_var.set(current_week_str)
+                cur = current_week_str
+            elif weeks:
+                # Fall back to most recent week
+                latest = f"Týden {weeks[0]}"
+                self.week_filter_var.set(latest)
+                cur = latest
+
         if cur not in options:
             self.week_filter_var.set("Vše")
+            cur = "Vše"
 
         # Fetch data
         sel = self.week_filter_var.get()
@@ -934,7 +957,7 @@ class DochazkaApp(tk.Tk):
         self.e_odchod.delete(0, tk.END)
         self.e_odchod.insert(0, rec[4] or "")
         self.obed_var.set(bool(rec[6]))
-        self.save_btn.config(text="✎  Aktualizovat")
+        self.save_btn.config(text="Aktualizovat")
         self.delete_btn.config(state="normal")
 
     def _clear_form(self):
@@ -1135,19 +1158,21 @@ class DochazkaApp(tk.Tk):
     def zobraz_okno(self, icon=None, item=None):
         self.after(0, self.deiconify)
         self.after(0, self.lift)
+        self.after(0, self.focus_force)
 
     def ukoncit_aplikaci(self, icon=None, item=None):
-        self.tray.stop()
-        self.destroy()
-
-    def _on_close(self):
-        # Auto-odchod: doplnit odchod na otevřený záznam
+        # Auto-odchod při ukončení
         open_rec = self.db.find_open_record()
         if open_rec:
             now_str = datetime.datetime.now().strftime("%H:%M")
             self.db.update_odchod(open_rec[0], now_str)
         self.tray.stop()
-        self.destroy()
+        self.after(0, self.destroy)
+
+    def _on_close(self):
+        # Minimize to tray instead of closing
+        self.withdraw()
+        self.tray.hide_window()
 
     # ═════════════════════════════════════════════════════════════════════════
     #  TICK (live refresh)
