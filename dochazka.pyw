@@ -1,814 +1,1194 @@
-# dochazka.pyw  –  Premium UI Reconstruction
-# Framework: CustomTkinter  |  Theme: Dark "Zinc" Dashboard
-# ─────────────────────────────────────────────────────────────
+"""
+Docházkový systém — moderní desktopová aplikace (tkinter)
+Verze 2.0
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-import sys
+import datetime
 import csv
-from datetime import datetime, timedelta
-import psutil
-import threading
-from collections import defaultdict
-
-import customtkinter as ctk
-from customtkinter import (CTk, CTkFrame, CTkLabel, CTkEntry,
-                            CTkButton, CTkCheckBox, CTkComboBox,
-                            CTkProgressBar, CTkFont)
+import os
 
 import config
-from utils import formatuj_minuty, cas_na_minuty, normalizuj_cas, set_dark_title_bar
 from database import DochazkaDB
-import calculator
+from calculator import week_analysis, month_balance
+from utils import formatuj_minuty, cas_na_minuty, normalizuj_cas, set_dark_title_bar
+from tray import TrayIcon
+from eventlog import get_last_system_offline_time
 
-try:
-    from tray import TrayIcon
-    TRAY_DOSTUPNY = True
-except ImportError:
-    TRAY_DOSTUPNY = False
+# ─────────────────────────────────────────────────────────────────────────────
+#  PALETA BAREV
+# ─────────────────────────────────────────────────────────────────────────────
+C = {
+    "bg":        "#0d0f12",
+    "surface":   "#13161b",
+    "panel":     "#1a1e26",
+    "border":    "#252b36",
+    "border2":   "#2e3645",
+    "text":      "#e2e8f0",
+    "muted":     "#64748b",
+    "accent":    "#3b82f6",
+    "accent2":   "#60a5fa",
+    "green":     "#22c55e",
+    "red":       "#ef4444",
+    "amber":     "#f59e0b",
+    "white":     "#ffffff",
+    "sidebar":   "#0f1218",
+}
 
-# ── Appearance ────────────────────────────────────────────────
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
-
-# ── Color Palette  (zinc + slate) ─────────────────────────────
-BG           = "#09090b"   # root background
-SIDEBAR      = "#111113"   # sidebar
-CARD         = "#18181b"   # card / panel
-CARD_DEEP    = "#101012"   # deeper card accent
-BORDER       = "#27272a"   # glass border
-ACCENT       = "#3b82f6"   # primary blue
-ACCENT_HOVER = "#2563eb"
-TEXT         = "#e2e8f0"   # primary text
-SUB          = "#64748b"   # muted labels
-GREEN_BG     = "#14291d"
-GREEN_FG     = "#4ade80"
-RED_FG       = "#f87171"
-DARK_HOVER   = "#1f1f23"
-
-# Fonts are initialised inside PatecniVestec.__init__() after CTk() is created.
-# Module-level tuple used only for ttk (which accepts plain tuples).
-FONT_TABLE = ("Segoe UI Variable", 10)
+FONT_MONO  = ("Consolas", 10)
+FONT_MONO_S = ("Consolas", 9)
+FONT_MONO_L = ("Consolas", 12, "bold")
+FONT_HERO  = ("Segoe UI", 42, "bold")
+FONT_H1    = ("Segoe UI", 16, "bold")
+FONT_H2    = ("Segoe UI", 12, "bold")
+FONT_LABEL = ("Segoe UI", 8)
+FONT_SMALL = ("Consolas", 8)
 
 
-# ══════════════════════════════════════════════════════════════
-class PatecniVestec:
-    def __init__(self, root: CTk):
-        self.root = root
-        self.root.title("Páteční Věštec")
-        self.root.geometry("1000x650")
-        self.root.resizable(False, False)
-        self.root.configure(fg_color=BG)
+def get_week_number(date):
+    return date.isocalendar()[1]
 
-        if sys.platform == "win32":
-            set_dark_title_bar(root)
 
-        # ── Fonts (must be created AFTER CTk root exists)
-        global FONT_TITLE, FONT_HERO, FONT_HERO_SM, FONT_VALUE
-        global FONT_LABEL, FONT_CAPTION, FONT_NAV, FONT_TAG
-        FONT_TITLE   = CTkFont(family="Segoe UI Variable", size=28, weight="bold")
-        FONT_HERO    = CTkFont(family="Segoe UI Variable", size=64, weight="bold")
-        FONT_HERO_SM = CTkFont(family="Segoe UI Variable", size=20, weight="bold")
-        FONT_VALUE   = CTkFont(family="Segoe UI Variable", size=22, weight="bold")
-        FONT_LABEL   = CTkFont(family="Segoe UI Variable", size=11, weight="normal")
-        FONT_CAPTION = CTkFont(family="Segoe UI Variable", size=10, weight="normal")
-        FONT_NAV     = CTkFont(family="Segoe UI Variable", size=13, weight="normal")
-        FONT_TAG     = CTkFont(family="Segoe UI Variable", size=10, weight="bold")
+def day_name_cs(date):
+    names = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]
+    return names[date.weekday()]
 
-        self.db      = DochazkaDB()
-        self.edit_id = None
 
-        # Root grid: sidebar | main
-        self.root.grid_columnconfigure(0, weight=0, minsize=210)
-        self.root.grid_columnconfigure(1, weight=1)
-        self.root.grid_rowconfigure(0, weight=1)
+# ─────────────────────────────────────────────────────────────────────────────
+#  HELPER WIDGETS
+# ─────────────────────────────────────────────────────────────────────────────
 
+class DarkEntry(tk.Entry):
+    def __init__(self, parent, **kwargs):
+        kwargs.setdefault("bg", C["bg"])
+        kwargs.setdefault("fg", C["text"])
+        kwargs.setdefault("insertbackground", C["accent"])
+        kwargs.setdefault("relief", "flat")
+        kwargs.setdefault("font", FONT_MONO)
+        kwargs.setdefault("highlightthickness", 1)
+        kwargs.setdefault("highlightbackground", C["border2"])
+        kwargs.setdefault("highlightcolor", C["accent"])
+        super().__init__(parent, **kwargs)
+
+
+class DarkButton(tk.Button):
+    def __init__(self, parent, accent=False, danger=False, ghost=False, **kwargs):
+        bg = C["accent"] if accent else C["red"] if danger else C["panel"]
+        fg = C["white"] if (accent or danger) else (C["muted"] if ghost else C["text"])
+        ab = C["accent2"] if accent else "#c0392b" if danger else C["border2"]
+        kwargs.setdefault("bg", bg)
+        kwargs.setdefault("fg", fg)
+        kwargs.setdefault("activebackground", ab)
+        kwargs.setdefault("activeforeground", C["white"])
+        kwargs.setdefault("relief", "flat")
+        kwargs.setdefault("font", FONT_MONO_S)
+        kwargs.setdefault("cursor", "hand2")
+        kwargs.setdefault("padx", 12)
+        kwargs.setdefault("pady", 6)
+        kwargs.setdefault("bd", 0)
+        super().__init__(parent, **kwargs)
+        self.bind("<Enter>", lambda e: self.config(bg=ab))
+        self.bind("<Leave>", lambda e: self.config(bg=bg))
+
+
+class Separator(tk.Frame):
+    def __init__(self, parent, **kwargs):
+        kwargs.setdefault("bg", C["border"])
+        kwargs.setdefault("height", 1)
+        super().__init__(parent, **kwargs)
+
+
+class SidebarButton(tk.Button):
+    def __init__(self, parent, **kwargs):
+        kwargs.setdefault("bg", C["sidebar"])
+        kwargs.setdefault("fg", C["muted"])
+        kwargs.setdefault("activebackground", C["panel"])
+        kwargs.setdefault("activeforeground", C["text"])
+        kwargs.setdefault("relief", "flat")
+        kwargs.setdefault("font", ("Segoe UI", 10))
+        kwargs.setdefault("cursor", "hand2")
+        kwargs.setdefault("anchor", "w")
+        kwargs.setdefault("padx", 20)
+        kwargs.setdefault("pady", 10)
+        kwargs.setdefault("bd", 0)
+        super().__init__(parent, **kwargs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  LIVE BADGE (pulzující tečka)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LiveBadge(tk.Frame):
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, bg=C["surface"], **kwargs)
+        self.dot = tk.Label(self, text="●", fg=C["green"], bg=C["surface"],
+                            font=("Segoe UI", 8))
+        self.dot.pack(side="left")
+        tk.Label(self, text="LIVE", fg=C["green"], bg=C["surface"],
+                 font=("Consolas", 8, "bold")).pack(side="left", padx=(2, 0))
+        self._blink_state = True
+        self._blink()
+
+    def _blink(self):
+        self._blink_state = not self._blink_state
+        self.dot.config(fg=C["green"] if self._blink_state else C["muted"])
+        self.after(800, self._blink)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PROGRESS BAR (custom canvas)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ProgressBar(tk.Canvas):
+    def __init__(self, parent, height=8, **kwargs):
+        kwargs.setdefault("bg", C["panel"])
+        kwargs.setdefault("highlightthickness", 0)
+        kwargs.setdefault("height", height)
+        super().__init__(parent, **kwargs)
+        self._pct = 0
+        self.bind("<Configure>", self._draw)
+
+    def set(self, pct):
+        self._pct = max(0, min(100, pct))
+        self._draw()
+
+    def _draw(self, event=None):
+        self.delete("all")
+        w = self.winfo_width() or 200
+        h = self.winfo_height() or 8
+        r = h // 2
+        # track
+        self.create_rounded_rect(0, 0, w, h, r, fill=C["border"], outline="")
+        # fill
+        fw = int(w * self._pct / 100)
+        if fw > r * 2:
+            self.create_rounded_rect(0, 0, fw, h, r, fill=C["accent"], outline="")
+
+    def create_rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        self.create_arc(x1, y1, x1 + 2*r, y1 + 2*r, start=90, extent=90, style="pieslice", **kwargs)
+        self.create_arc(x2 - 2*r, y1, x2, y1 + 2*r, start=0, extent=90, style="pieslice", **kwargs)
+        self.create_arc(x1, y2 - 2*r, x1 + 2*r, y2, start=180, extent=90, style="pieslice", **kwargs)
+        self.create_arc(x2 - 2*r, y2 - 2*r, x2, y2, start=270, extent=90, style="pieslice", **kwargs)
+        self.create_rectangle(x1 + r, y1, x2 - r, y2, **kwargs)
+        self.create_rectangle(x1, y1 + r, x2, y2 - r, **kwargs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  HLAVNÍ APLIKACE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DochazkaApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.db = DochazkaDB()
+        self.tray = TrayIcon(self)
+
+        self.selected_id = None
+        self._toast_job = None
+        self._pages = {}
+
+        self._setup_window()
+        self._setup_styles()
         self._build_ui()
-        self.nacti_tydny_do_filtru()
-        self.reset_form()
-        self.obnovit_data()
-        self.periodicka_aktualizace()
-        self.root.after(2000, self.check_unfinished_shift)
 
-        if TRAY_DOSTUPNY:
-            self.tray = TrayIcon(self)
-            self.tray.create()
-            self.root.protocol("WM_DELETE_WINDOW", self.minimalizuj_do_tray)
-        else:
-            self.root.protocol("WM_DELETE_WINDOW", self.root.quit)
+        set_dark_title_bar(self)
+        self._auto_zapis_prichod()
+        self._refresh()
+        self.after(30_000, self._tick)
 
-        self.root.after(1000, self.check_boot_time_and_record)
+    # ── WINDOW SETUP ──────────────────────────────────────────────────────────
 
-    # ─────────────────────────────────────────────────────────
-    # TOP-LEVEL BUILD
-    # ─────────────────────────────────────────────────────────
+    def _setup_window(self):
+        self.title("Docházkový systém")
+        self.geometry("1120x720")
+        self.minsize(900, 600)
+        self.configure(bg=C["bg"])
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _setup_styles(self):
+        style = ttk.Style(self)
+        style.theme_use("clam")
+
+        # Treeview
+        style.configure("Dark.Treeview",
+            background=C["panel"],
+            foreground=C["text"],
+            fieldbackground=C["panel"],
+            borderwidth=0,
+            rowheight=28,
+            font=FONT_MONO_S,
+        )
+        style.configure("Dark.Treeview.Heading",
+            background=C["surface"],
+            foreground=C["muted"],
+            borderwidth=0,
+            font=("Consolas", 8, "bold"),
+            relief="flat",
+        )
+        style.map("Dark.Treeview",
+            background=[("selected", C["accent"])],
+            foreground=[("selected", C["white"])],
+        )
+        style.map("Dark.Treeview.Heading",
+            background=[("active", C["border"])],
+        )
+
+        # Combobox
+        style.configure("Dark.TCombobox",
+            fieldbackground=C["bg"],
+            background=C["bg"],
+            foreground=C["text"],
+            arrowcolor=C["muted"],
+            borderwidth=1,
+            relief="flat",
+        )
+        style.map("Dark.TCombobox",
+            fieldbackground=[("readonly", C["bg"])],
+            selectbackground=[("readonly", C["bg"])],
+            selectforeground=[("readonly", C["text"])],
+        )
+
+        # Scrollbar
+        style.configure("Dark.Vertical.TScrollbar",
+            background=C["border"],
+            troughcolor=C["panel"],
+            borderwidth=0,
+            arrowsize=12,
+        )
+
+        # Checkbutton
+        style.configure("Dark.TCheckbutton",
+            background=C["panel"],
+            foreground=C["text"],
+            font=FONT_MONO_S,
+        )
+
+    # ── BUILD UI ──────────────────────────────────────────────────────────────
+
     def _build_ui(self):
-        self.create_sidebar()
-        self.create_main()
+        # ── Sidebar
+        self._build_sidebar()
 
-    # ─────────────────────────────────────────────────────────
-    # SIDEBAR
-    # ─────────────────────────────────────────────────────────
-    def create_sidebar(self):
-        self.sidebar = CTkFrame(
-            self.root,
-            width=210,
-            fg_color=SIDEBAR,
-            border_width=1,
-            border_color=BORDER,
-            corner_radius=16
-        )
-        self.sidebar.grid(row=0, column=0, sticky="ns", padx=(10, 5), pady=10)
-        self.sidebar.grid_propagate(False)
-        self.sidebar.grid_rowconfigure(5, weight=1)   # spacer row
+        # ── Main area
+        self.main_frame = tk.Frame(self, bg=C["bg"])
+        self.main_frame.pack(side="left", fill="both", expand=True)
 
-        # ── Logo / title
-        logo_frame = CTkFrame(self.sidebar, fg_color="transparent")
-        logo_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(28, 32))
+        # Topbar
+        self._build_topbar()
 
-        CTkLabel(
-            logo_frame, text="Páteční", font=FONT_TITLE,
-            text_color=TEXT, justify="left", anchor="w"
-        ).pack(fill="x")
-        CTkLabel(
-            logo_frame, text="Věštec",
-            font=CTkFont(family="Segoe UI Variable", size=28, weight="normal"),
-            text_color=ACCENT, justify="left", anchor="w"
-        ).pack(fill="x")
+        # Content (notebook-like pages)
+        self.content = tk.Frame(self.main_frame, bg=C["bg"])
+        self.content.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # thin divider
-        CTkFrame(self.sidebar, fg_color=BORDER, height=1, corner_radius=0
-                 ).grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 16))
+        self._build_page_dashboard()
+        self._build_page_history()
+        self._build_page_settings()
 
-        # ── Nav section label
-        CTkLabel(
-            self.sidebar, text="PŘEHLED",
-            font=FONT_CAPTION, text_color=SUB, anchor="w"
-        ).grid(row=2, column=0, sticky="ew", padx=24, pady=(0, 6))
+        self._show_page("dashboard")
 
-        # ── Nav buttons
-        nav_frame = CTkFrame(self.sidebar, fg_color="transparent")
-        nav_frame.grid(row=3, column=0, sticky="ew", padx=12, pady=0)
+    # ── SIDEBAR ───────────────────────────────────────────────────────────────
 
-        self._nav_btn(nav_frame, "⬛  Dashboard",  active=True)
-        self._nav_btn(nav_frame, "📋  Historie",   active=False)
-        self._nav_btn(nav_frame, "⚙️  Nastavení",  active=False)
+    def _build_sidebar(self):
+        self.sidebar = tk.Frame(self, bg=C["sidebar"], width=210)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
 
-        # spacer
-        CTkFrame(self.sidebar, fg_color="transparent").grid(row=5, column=0, sticky="nsew")
+        # Logo
+        logo_frame = tk.Frame(self.sidebar, bg=C["sidebar"], pady=18)
+        logo_frame.pack(fill="x")
+        tk.Label(logo_frame, text="⏱ DOCHÁZKOVÝ", bg=C["sidebar"],
+                 fg=C["accent"], font=("Segoe UI", 13, "bold"),
+                 anchor="w", padx=20).pack(fill="x")
+        tk.Label(logo_frame, text="  SYSTÉM", bg=C["sidebar"],
+                 fg=C["text"], font=("Segoe UI", 13, "bold"),
+                 anchor="w", padx=20).pack(fill="x")
+        tk.Label(logo_frame, text="Evidence pracovní doby", bg=C["sidebar"],
+                 fg=C["muted"], font=("Segoe UI", 8),
+                 anchor="w", padx=20).pack(fill="x", pady=(2, 0))
 
-        # ── Bottom buttons
-        CTkFrame(self.sidebar, fg_color=BORDER, height=1, corner_radius=0
-                 ).grid(row=6, column=0, sticky="ew", padx=16, pady=(0, 8))
+        Separator(self.sidebar).pack(fill="x", padx=0)
 
-        bottom = CTkFrame(self.sidebar, fg_color="transparent")
-        bottom.grid(row=7, column=0, sticky="ew", padx=12, pady=(0, 16))
+        # Nav items
+        nav_frame = tk.Frame(self.sidebar, bg=C["sidebar"])
+        nav_frame.pack(fill="x", pady=8)
 
-        self._nav_btn(bottom, "↑  Export",  cmd=self.export_s_vyberem_mesicu)
-        self._nav_btn(bottom, "↻  Obnovit", cmd=self.obnovit_data)
+        self._nav_btns = {}
+        nav_items = [
+            ("dashboard",  "⬡  Dashboard"),
+            ("history",    "≡  Historie"),
+            ("settings",   "◈  Nastavení"),
+        ]
+        for key, label in nav_items:
+            btn = SidebarButton(nav_frame, text=label,
+                                command=lambda k=key: self._show_page(k))
+            btn.pack(fill="x")
+            self._nav_btns[key] = btn
 
-    def _nav_btn(self, parent, text, active=False, cmd=None):
-        btn = CTkButton(
-            parent, text=text,
-            font=FONT_NAV,
-            anchor="w",
-            fg_color=ACCENT if active else "transparent",
-            text_color=TEXT if active else SUB,
-            hover_color=ACCENT_HOVER if active else DARK_HOVER,
-            height=36, corner_radius=8,
-            command=cmd if cmd else lambda: None
-        )
-        btn.pack(fill="x", pady=2, padx=0)
-        return btn
+        # Bottom
+        Separator(self.sidebar).pack(fill="x", side="bottom")
+        tk.Label(self.sidebar, text="v2.0.0 · 2025", bg=C["sidebar"],
+                 fg=C["muted"], font=("Consolas", 8),
+                 anchor="w", padx=20, pady=12).pack(side="bottom", fill="x")
 
-    # ─────────────────────────────────────────────────────────
-    # MAIN AREA
-    # ─────────────────────────────────────────────────────────
-    def create_main(self):
-        self.main = CTkFrame(self.root, fg_color=BG, corner_radius=0)
-        self.main.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
-        self.main.grid_rowconfigure(2, weight=1)   # history expands
-        self.main.grid_columnconfigure(0, weight=1)
+    # ── TOPBAR ────────────────────────────────────────────────────────────────
 
-        self.create_topbar()
-        self.create_hero_row()
-        self.create_content_row()
+    def _build_topbar(self):
+        tb = tk.Frame(self.main_frame, bg=C["surface"], height=52)
+        tb.pack(fill="x")
+        tb.pack_propagate(False)
 
-    # ── Top bar (date + status dot)
-    def create_topbar(self):
-        bar = CTkFrame(self.main, fg_color="transparent", height=36)
-        bar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        Separator(tb).pack(side="bottom", fill="x")
 
-        self.lbl_date = CTkLabel(
-            bar, text=datetime.now().strftime("%A, %-d. %B %Y")
-                       if sys.platform != "win32"
-                       else datetime.now().strftime("%A, %d. %B %Y"),
-            font=FONT_LABEL, text_color=SUB
-        )
-        self.lbl_date.pack(side="left")
+        self.topbar_title = tk.Label(tb, text="Dashboard", bg=C["surface"],
+                                     fg=C["text"], font=FONT_H2, anchor="w")
+        self.topbar_title.pack(side="left", padx=20)
 
-        # live "●" dot
-        self.lbl_live = CTkLabel(
-            bar, text="● LIVE",
-            font=CTkFont(family="Segoe UI Variable", size=10, weight="bold"),
-            text_color=GREEN_FG
-        )
-        self.lbl_live.pack(side="right")
+        # Right side: week badge + live badge
+        right = tk.Frame(tb, bg=C["surface"])
+        right.pack(side="right", padx=16)
 
-    # ── Hero row: big clock + 3 stat cards
-    def create_hero_row(self):
-        row = CTkFrame(self.main, fg_color="transparent")
-        row.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        row.grid_columnconfigure(0, weight=0)   # hero card – fixed
-        row.grid_columnconfigure(1, weight=1)   # stats – expand
+        LiveBadge(right).pack(side="right", padx=(8, 0))
 
-        # ── Hero card
-        self.hero_card = CTkFrame(
-            row, fg_color=CARD,
-            border_width=1, border_color=BORDER,
-            corner_radius=16
-        )
-        self.hero_card.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        self.week_badge = tk.Label(right, text="TÝ. 00 · 2025",
+                                   bg=C["border"], fg=C["muted"],
+                                   font=("Consolas", 8),
+                                   padx=10, pady=4, relief="flat")
+        self.week_badge.pack(side="right")
 
-        # tiny label above the big time
-        CTkLabel(
-            self.hero_card, text="ODCHOD V PÁTEK",
-            font=FONT_CAPTION, text_color=SUB
-        ).pack(padx=28, pady=(20, 0), anchor="w")
+    # ── PAGE NAVIGATION ───────────────────────────────────────────────────────
 
-        self.hero_label = CTkLabel(
-            self.hero_card, text="--:--",
-            font=FONT_HERO, text_color=TEXT
-        )
-        self.hero_label.pack(padx=28, pady=(0, 4))
+    def _show_page(self, name):
+        for key, frame in self._pages.items():
+            frame.pack_forget()
+        self._pages[name].pack(fill="both", expand=True)
 
-        # progress bar inside hero
-        self.progress = CTkProgressBar(
-            self.hero_card,
-            height=4, corner_radius=2,
-            fg_color=BORDER, progress_color=ACCENT
-        )
-        self.progress.pack(fill="x", padx=28, pady=(0, 4))
-        self.progress.set(0)
+        titles = {"dashboard": "Dashboard", "history": "Historie", "settings": "Nastavení"}
+        self.topbar_title.config(text=titles.get(name, name))
 
-        self.lbl_percent = CTkLabel(
-            self.hero_card, text="0 %",
-            font=CTkFont(family="Segoe UI Variable", size=11, weight="bold"),
-            text_color=ACCENT
-        )
-        self.lbl_percent.pack(padx=28, pady=(0, 20), anchor="e")
+        for key, btn in self._nav_btns.items():
+            if key == name:
+                btn.config(bg=C["panel"], fg=C["accent2"],
+                           relief="flat")
+            else:
+                btn.config(bg=C["sidebar"], fg=C["muted"], relief="flat")
 
-        # ── 3 stat cards (right of hero)
-        stats_grid = CTkFrame(row, fg_color="transparent")
-        stats_grid.grid(row=0, column=1, sticky="nsew")
-        for i in range(3):
-            stats_grid.grid_columnconfigure(i, weight=1, uniform="sc")
-        stats_grid.grid_rowconfigure(0, weight=1)
+        if name == "history":
+            self._refresh_history()
+        elif name == "dashboard":
+            self._refresh()
 
-        self._stat_card(stats_grid, "ODPRACOVÁNO", "--", 0, icon="⏱")
-        self._stat_card(stats_grid, "ZBÝVÁ",       "--", 1, icon="⏳")
-        self._stat_card(stats_grid, "BILANCE",     "--", 2, icon="⚖")
+    # ═════════════════════════════════════════════════════════════════════════
+    #  DASHBOARD PAGE
+    # ═════════════════════════════════════════════════════════════════════════
 
-    def _stat_card(self, parent, label, value, col, icon=""):
-        card = CTkFrame(
-            parent, fg_color=CARD,
-            border_width=1, border_color=BORDER,
-            corner_radius=16
-        )
-        card.grid(row=0, column=col, sticky="nsew", padx=5, pady=0)
-        card.grid_rowconfigure(0, weight=1)
+    def _build_page_dashboard(self):
+        page = tk.Frame(self.content, bg=C["bg"])
+        self._pages["dashboard"] = page
 
-        inner = CTkFrame(card, fg_color="transparent")
-        inner.pack(expand=True, fill="both", padx=22, pady=22)
+        # Outer padding
+        pad = tk.Frame(page, bg=C["bg"])
+        pad.pack(fill="both", expand=True, padx=20, pady=16)
 
-        # icon + label row
-        top = CTkFrame(inner, fg_color="transparent")
-        top.pack(fill="x")
-        CTkLabel(top, text=icon, font=FONT_LABEL, text_color=SUB).pack(side="left")
-        CTkLabel(top, text=f"  {label}", font=FONT_CAPTION, text_color=SUB).pack(side="left")
+        # ── ROW 1: Hero cards
+        row1 = tk.Frame(pad, bg=C["bg"])
+        row1.pack(fill="x", pady=(0, 12))
 
-        val_lbl = CTkLabel(
-            inner, text=value,
-            font=FONT_VALUE, text_color=TEXT, anchor="w"
-        )
-        val_lbl.pack(fill="x", pady=(8, 0))
+        self._build_pred_card(row1)
+        self._build_progress_card(row1)
 
-        # store ref by label key (normalised)
-        key = label.lower().replace(" ", "_")
-        setattr(self, f"stat_{key}_value", val_lbl)
-        return card
+        # ── ROW 2: Stat cards
+        row2 = tk.Frame(pad, bg=C["bg"])
+        row2.pack(fill="x", pady=(0, 12))
 
-    # ── Content row: form card  |  history card
-    def create_content_row(self):
-        row = CTkFrame(self.main, fg_color="transparent")
-        row.grid(row=2, column=0, sticky="nsew", pady=(0, 0))
-        row.grid_columnconfigure(0, weight=1)
-        row.grid_rowconfigure(0, weight=0)
-        row.grid_rowconfigure(1, weight=1)
+        self.stat_celkem = self._build_stat_card(row2, "◎  CELKEM ODPRACOVÁNO", "--", "tento týden")
+        self.stat_zbyva  = self._build_stat_card(row2, "◷  ZBÝVÁ DOPRACOVAT",   "--", "do splnění fondu")
+        self.stat_bilance = self._build_stat_card(row2, "◈  MĚSÍČNÍ BILANCE",   "+0h 00m", "tento měsíc")
 
-        self.create_form_card(row)
-        self.create_history_card(row)
+        # ── ROW 3: Form + Table
+        row3 = tk.Frame(pad, bg=C["bg"])
+        row3.pack(fill="both", expand=True)
 
-    # ─────────────────────────────────────────────────────────
-    # FORM CARD
-    # ─────────────────────────────────────────────────────────
-    def create_form_card(self, parent):
-        card = CTkFrame(
-            parent, fg_color=CARD,
-            border_width=1, border_color=BORDER,
-            corner_radius=16
-        )
-        card.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self._build_form_card(row3)
+        self._build_table_card(row3)
 
-        # header row
-        hdr = CTkFrame(card, fg_color="transparent")
-        hdr.pack(fill="x", padx=22, pady=(16, 12))
+    # ── PREDICTION CARD ───────────────────────────────────────────────────────
 
-        CTkLabel(
-            hdr, text="EDITACE DNE",
-            font=CTkFont(family="Segoe UI Variable", size=11, weight="bold"),
-            text_color=ACCENT
-        ).pack(side="left")
+    def _build_pred_card(self, parent):
+        card = tk.Frame(parent, bg=C["panel"], padx=24, pady=22)
+        card.pack(side="left", fill="both", padx=(0, 10))
 
-        self.btn_ulozit = CTkButton(
-            hdr, text="ULOŽIT ZÁZNAM",
-            font=CTkFont(family="Segoe UI Variable", size=11, weight="bold"),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            height=30, corner_radius=8,
-            command=self.ulozit
-        )
-        self.btn_ulozit.pack(side="right")
+        # Top accent line (canvas trick)
+        accent_bar = tk.Canvas(card, bg=C["panel"], height=3,
+                               highlightthickness=0)
+        accent_bar.pack(fill="x", pady=(0, 12))
+        accent_bar.bind("<Configure>", lambda e: self._draw_gradient_bar(accent_bar))
 
-        # input row
-        inputs = CTkFrame(card, fg_color="transparent")
-        inputs.pack(fill="x", padx=22, pady=(0, 16))
+        tk.Label(card, text="PREDIKCE ODCHODU", bg=C["panel"],
+                 fg=C["muted"], font=("Consolas", 8),
+                 anchor="w").pack(fill="x")
+
+        self.pred_day_lbl = tk.Label(card, text="PÁTEK", bg=C["panel"],
+                                     fg=C["accent2"], font=("Consolas", 9),
+                                     anchor="w")
+        self.pred_day_lbl.pack(fill="x", pady=(2, 0))
+
+        self.pred_time_lbl = tk.Label(card, text="--:--", bg=C["panel"],
+                                      fg=C["text"], font=FONT_HERO,
+                                      anchor="w")
+        self.pred_time_lbl.pack(fill="x")
+
+        self.pred_sub_lbl = tk.Label(card, text="Výpočet...", bg=C["panel"],
+                                     fg=C["muted"], font=("Segoe UI", 8),
+                                     anchor="w")
+        self.pred_sub_lbl.pack(fill="x")
+
+    def _draw_gradient_bar(self, canvas):
+        canvas.delete("all")
+        w = canvas.winfo_width() or 200
+        steps = 40
+        for i in range(steps):
+            x1 = int(w * i / steps)
+            x2 = int(w * (i + 1) / steps)
+            r = int(0x3b + (0x22 - 0x3b) * i / steps)
+            g = int(0x82 + (0xc5 - 0x82) * i / steps)
+            b = int(0xf6 + (0x5e - 0xf6) * i / steps)
+            color = f"#{r:02x}{g:02x}{b:02x}"
+            canvas.create_rectangle(x1, 0, x2, 3, fill=color, outline="")
+
+    # ── PROGRESS CARD ─────────────────────────────────────────────────────────
+
+    def _build_progress_card(self, parent):
+        card = tk.Frame(parent, bg=C["panel"], padx=24, pady=22)
+        card.pack(side="left", fill="both", expand=True)
+
+        # Header row
+        header = tk.Frame(card, bg=C["panel"])
+        header.pack(fill="x", pady=(0, 4))
+
+        tk.Label(header, text="TÝDENNÍ FOND", bg=C["panel"],
+                 fg=C["muted"], font=("Consolas", 8),
+                 anchor="w").pack(side="left")
+
+        self.prog_pct_lbl = tk.Label(header, text="0%", bg=C["panel"],
+                                     fg=C["text"], font=("Segoe UI", 24, "bold"))
+        self.prog_pct_lbl.pack(side="right")
+
+        self.prog_bar = ProgressBar(card, height=8)
+        self.prog_bar.pack(fill="x", pady=8)
+
+        meta = tk.Frame(card, bg=C["panel"])
+        meta.pack(fill="x")
+        self.prog_done_lbl = tk.Label(meta, text="0h 00m odpracováno",
+                                      bg=C["panel"], fg=C["muted"],
+                                      font=FONT_SMALL, anchor="w")
+        self.prog_done_lbl.pack(side="left")
+        self.prog_left_lbl = tk.Label(meta, text="40h 00m zbývá",
+                                      bg=C["panel"], fg=C["muted"],
+                                      font=FONT_SMALL, anchor="e")
+        self.prog_left_lbl.pack(side="right")
+
+        # Week days mini
+        self.week_days_frame = tk.Frame(card, bg=C["panel"])
+        self.week_days_frame.pack(fill="x", pady=(12, 0))
+
+    # ── STAT CARD ─────────────────────────────────────────────────────────────
+
+    def _build_stat_card(self, parent, label, value, sub):
+        card = tk.Frame(parent, bg=C["panel"], padx=20, pady=18)
+        card.pack(side="left", fill="both", expand=True, padx=(0, 10))
+
+        tk.Label(card, text=label, bg=C["panel"], fg=C["muted"],
+                 font=("Consolas", 8), anchor="w").pack(fill="x")
+
+        val_lbl = tk.Label(card, text=value, bg=C["panel"], fg=C["text"],
+                           font=("Segoe UI", 22, "bold"), anchor="w")
+        val_lbl.pack(fill="x", pady=(6, 2))
+
+        tk.Label(card, text=sub, bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI", 8), anchor="w").pack(fill="x")
+        return val_lbl
+
+    # ── FORM CARD ─────────────────────────────────────────────────────────────
+
+    def _build_form_card(self, parent):
+        card = tk.Frame(parent, bg=C["panel"], padx=18, pady=18, width=340)
+        card.pack(side="left", fill="y", padx=(0, 10))
+        card.pack_propagate(False)
+
+        tk.Label(card, text="ZÁZNAM SMĚNY", bg=C["panel"],
+                 fg=C["muted"], font=("Consolas", 8),
+                 anchor="w").pack(fill="x")
+        Separator(card).pack(fill="x", pady=10)
 
         # Datum
-        self.ent_datum = self._field_group(inputs, "DATUM", 110)
+        tk.Label(card, text="DATUM", bg=C["panel"], fg=C["muted"],
+                 font=("Consolas", 7), anchor="w").pack(fill="x")
+        self.e_datum = DarkEntry(card)
+        self.e_datum.pack(fill="x", pady=(3, 10), ipady=5)
+        self.e_datum.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
 
-        # Příchod + TEĎ
-        prichod_wrap = CTkFrame(inputs, fg_color="transparent")
-        prichod_wrap.pack(side="left", padx=(0, 20))
-        CTkLabel(prichod_wrap, text="PŘÍCHOD", font=FONT_CAPTION,
-                 text_color=SUB).pack(anchor="w")
-        prichod_row = CTkFrame(prichod_wrap, fg_color="transparent")
-        prichod_row.pack()
-        self.ent_prichod = CTkEntry(
-            prichod_row, width=78, height=32,
-            fg_color=CARD_DEEP, border_width=1, border_color=BORDER,
-            text_color=TEXT, corner_radius=8
-        )
-        self.ent_prichod.pack(side="left")
-        self.ent_prichod.bind("<FocusOut>", lambda e: normalizuj_cas(self.ent_prichod))
-        self._ted_btn(prichod_row, self.ent_prichod)
+        # Příchod
+        tk.Label(card, text="PŘÍCHOD", bg=C["panel"], fg=C["muted"],
+                 font=("Consolas", 7), anchor="w").pack(fill="x")
+        pr_row = tk.Frame(card, bg=C["panel"])
+        pr_row.pack(fill="x", pady=(3, 10))
+        self.e_prichod = DarkEntry(pr_row, width=8)
+        self.e_prichod.pack(side="left", ipady=5)
+        self.e_prichod.bind("<FocusOut>", lambda e: normalizuj_cas(self.e_prichod))
+        DarkButton(pr_row, text="NOW", accent=True,
+                   command=lambda: self._set_now(self.e_prichod),
+                   padx=8, pady=4).pack(side="left", padx=(6, 0))
 
-        # Odchod + TEĎ
-        odchod_wrap = CTkFrame(inputs, fg_color="transparent")
-        odchod_wrap.pack(side="left", padx=(0, 20))
-        CTkLabel(odchod_wrap, text="ODCHOD", font=FONT_CAPTION,
-                 text_color=SUB).pack(anchor="w")
-        odchod_row = CTkFrame(odchod_wrap, fg_color="transparent")
-        odchod_row.pack()
-        self.ent_odchod = CTkEntry(
-            odchod_row, width=78, height=32,
-            fg_color=CARD_DEEP, border_width=1, border_color=BORDER,
-            text_color=TEXT, corner_radius=8
-        )
-        self.ent_odchod.pack(side="left")
-        self.ent_odchod.bind("<FocusOut>", lambda e: normalizuj_cas(self.ent_odchod))
-        self._ted_btn(odchod_row, self.ent_odchod)
+        # Odchod
+        tk.Label(card, text="ODCHOD", bg=C["panel"], fg=C["muted"],
+                 font=("Consolas", 7), anchor="w").pack(fill="x")
+        od_row = tk.Frame(card, bg=C["panel"])
+        od_row.pack(fill="x", pady=(3, 10))
+        self.e_odchod = DarkEntry(od_row, width=8)
+        self.e_odchod.pack(side="left", ipady=5)
+        self.e_odchod.bind("<FocusOut>", lambda e: normalizuj_cas(self.e_odchod))
+        DarkButton(od_row, text="NOW", accent=True,
+                   command=lambda: self._set_now(self.e_odchod),
+                   padx=8, pady=4).pack(side="left", padx=(6, 0))
 
         # Oběd checkbox
-        self.var_obed = tk.BooleanVar(value=True)
-        self.obed_check = CTkCheckBox(
-            inputs, text="Oběd",
-            variable=self.var_obed,
-            font=FONT_LABEL, text_color=SUB,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            border_color=BORDER, checkmark_color=TEXT
+        self.obed_var = tk.BooleanVar(value=True)
+        obed_row = tk.Frame(card, bg=C["panel"])
+        obed_row.pack(fill="x", pady=(0, 14))
+        cb = tk.Checkbutton(obed_row, text=" Odečíst oběd (30 min)",
+                            variable=self.obed_var,
+                            bg=C["panel"], fg=C["muted"],
+                            selectcolor=C["accent"],
+                            activebackground=C["panel"],
+                            activeforeground=C["text"],
+                            font=FONT_MONO_S,
+                            bd=0, highlightthickness=0,
+                            cursor="hand2")
+        cb.pack(anchor="w")
+
+        # Save button
+        self.save_btn = DarkButton(card, text="⊕  Uložit záznam",
+                                   accent=True,
+                                   command=self._save_record)
+        self.save_btn.pack(fill="x", pady=(0, 6))
+
+        # Delete button
+        self.delete_btn = DarkButton(card, text="✕  Smazat vybraný",
+                                     danger=True,
+                                     command=self._confirm_delete,
+                                     state="disabled")
+        self.delete_btn.pack(fill="x")
+
+    # ── TABLE CARD ────────────────────────────────────────────────────────────
+
+    def _build_table_card(self, parent):
+        card = tk.Frame(parent, bg=C["panel"], padx=16, pady=18)
+        card.pack(side="left", fill="both", expand=True)
+
+        # Toolbar
+        toolbar = tk.Frame(card, bg=C["panel"])
+        toolbar.pack(fill="x", pady=(0, 10))
+
+        tk.Label(toolbar, text="ZÁZNAMY", bg=C["panel"],
+                 fg=C["muted"], font=("Consolas", 8),
+                 anchor="w").pack(side="left")
+
+        # Week filter combobox
+        self.week_filter_var = tk.StringVar(value="Vše")
+        self.week_combo = ttk.Combobox(toolbar, textvariable=self.week_filter_var,
+                                       style="Dark.TCombobox", width=14,
+                                       state="readonly")
+        self.week_combo.pack(side="right")
+        self.week_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_table())
+
+        # Treeview
+        cols = ("id", "tyden", "datum", "prichod", "odchod", "minut")
+        self.tree = ttk.Treeview(card, columns=cols, show="headings",
+                                 style="Dark.Treeview", selectmode="browse")
+
+        heads = [("#", 40), ("Tý.", 40), ("Datum", 90), ("Příchod", 70),
+                 ("Odchod", 70), ("Čistý čas", 90)]
+        for (col, head_data), width in zip(zip(cols, heads), [h[1] for h in heads]):
+            self.tree.heading(col, text=heads[cols.index(col)][0])
+            self.tree.column(col, width=width, minwidth=width, anchor="center")
+
+        scroll = ttk.Scrollbar(card, orient="vertical",
+                               command=self.tree.yview,
+                               style="Dark.Vertical.TScrollbar")
+        self.tree.configure(yscrollcommand=scroll.set)
+
+        self.tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        self.tree.tag_configure("open", foreground=C["amber"])
+        self.tree.tag_configure("even", background=C["surface"])
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  HISTORY PAGE
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _build_page_history(self):
+        page = tk.Frame(self.content, bg=C["bg"])
+        self._pages["history"] = page
+
+        pad = tk.Frame(page, bg=C["bg"])
+        pad.pack(fill="both", expand=True, padx=20, pady=16)
+
+        # Controls bar
+        ctrl = tk.Frame(pad, bg=C["bg"])
+        ctrl.pack(fill="x", pady=(0, 12))
+
+        self.month_filter_var = tk.StringVar(value="Všechny měsíce")
+        self.month_combo = ttk.Combobox(ctrl, textvariable=self.month_filter_var,
+                                        style="Dark.TCombobox", width=18,
+                                        state="readonly")
+        self.month_combo.pack(side="left")
+        self.month_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_history())
+
+        DarkButton(ctrl, text="↓  Export CSV",
+                   command=self._export_csv,
+                   padx=14).pack(side="left", padx=10)
+
+        self.hist_count_lbl = tk.Label(ctrl, text="0 záznamů",
+                                       bg=C["bg"], fg=C["muted"],
+                                       font=FONT_SMALL)
+        self.hist_count_lbl.pack(side="right")
+
+        # Table
+        card = tk.Frame(pad, bg=C["panel"], padx=16, pady=16)
+        card.pack(fill="both", expand=True)
+
+        h_cols = ("id", "tyden", "datum", "den", "prichod", "odchod", "obed", "minut")
+        self.hist_tree = ttk.Treeview(card, columns=h_cols, show="headings",
+                                      style="Dark.Treeview", selectmode="browse")
+
+        h_heads = [("#", 40), ("Tý.", 40), ("Datum", 95), ("Den", 40),
+                   ("Příchod", 70), ("Odchod", 70), ("Ob.", 40), ("Čistý čas", 90)]
+        for col, (head, w) in zip(h_cols, h_heads):
+            self.hist_tree.heading(col, text=head)
+            self.hist_tree.column(col, width=w, minwidth=w, anchor="center")
+
+        h_scroll = ttk.Scrollbar(card, orient="vertical",
+                                 command=self.hist_tree.yview,
+                                 style="Dark.Vertical.TScrollbar")
+        self.hist_tree.configure(yscrollcommand=h_scroll.set)
+        self.hist_tree.pack(side="left", fill="both", expand=True)
+        h_scroll.pack(side="right", fill="y")
+
+        self.hist_tree.tag_configure("open", foreground=C["amber"])
+        self.hist_tree.tag_configure("even", background=C["surface"])
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  SETTINGS PAGE
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _build_page_settings(self):
+        page = tk.Frame(self.content, bg=C["bg"])
+        self._pages["settings"] = page
+
+        pad = tk.Frame(page, bg=C["bg"])
+        pad.pack(fill="both", expand=True, padx=20, pady=16)
+
+        def section(title):
+            tk.Label(pad, text=title, bg=C["bg"],
+                     fg=C["text"], font=FONT_H2,
+                     anchor="w").pack(fill="x", pady=(16, 4))
+            Separator(pad).pack(fill="x", pady=(0, 8))
+
+        def setting_row(label, desc, widget_fn):
+            row = tk.Frame(pad, bg=C["panel"], padx=20, pady=14)
+            row.pack(fill="x", pady=(0, 2))
+            info = tk.Frame(row, bg=C["panel"])
+            info.pack(side="left", fill="both", expand=True)
+            tk.Label(info, text=label, bg=C["panel"], fg=C["text"],
+                     font=FONT_MONO, anchor="w").pack(anchor="w")
+            tk.Label(info, text=desc, bg=C["panel"], fg=C["muted"],
+                     font=("Segoe UI", 8), anchor="w").pack(anchor="w")
+            w = widget_fn(row)
+            w.pack(side="right")
+            return w
+
+        section("Pracovní fond")
+
+        def mk_fond(p):
+            e = DarkEntry(p, width=8, justify="center")
+            e.insert(0, str(config.TYDENNI_FOND_HODIN))
+            e.bind("<FocusOut>", self._apply_settings)
+            return e
+        self.set_fond = setting_row("Týdenní fond hodin",
+                                    "Celkový počet hodin za pracovní týden", mk_fond)
+
+        def mk_obed(p):
+            e = DarkEntry(p, width=8, justify="center")
+            e.insert(0, str(config.OBED_MINUT))
+            e.bind("<FocusOut>", self._apply_settings)
+            return e
+        self.set_obed = setting_row("Délka oběda (min)",
+                                    "Počet minut odečtených za oběd", mk_obed)
+
+        section("Standardní časy")
+
+        def mk_prichod(p):
+            e = DarkEntry(p, width=8, justify="center")
+            e.insert(0, config.STANDARDNI_PRICHOD)
+            e.bind("<FocusOut>", self._apply_settings)
+            return e
+        self.set_prichod = setting_row("Standardní příchod",
+                                       "Výchozí čas příchodu", mk_prichod)
+
+        def mk_odchod(p):
+            e = DarkEntry(p, width=8, justify="center")
+            e.insert(0, config.STANDARDNI_ODCHOD)
+            e.bind("<FocusOut>", self._apply_settings)
+            return e
+        self.set_odchod = setting_row("Standardní odchod",
+                                      "Výchozí čas odchodu", mk_odchod)
+
+        section("Databáze")
+
+        row = tk.Frame(pad, bg=C["panel"], padx=20, pady=14)
+        row.pack(fill="x", pady=(0, 2))
+        info = tk.Frame(row, bg=C["panel"])
+        info.pack(side="left", fill="both", expand=True)
+        tk.Label(info, text="Smazat všechna data", bg=C["panel"],
+                 fg=C["text"], font=FONT_MONO, anchor="w").pack(anchor="w")
+        tk.Label(info, text="Tato akce je nevratná", bg=C["panel"],
+                 fg=C["muted"], font=("Segoe UI", 8), anchor="w").pack(anchor="w")
+        DarkButton(row, text="Smazat vše", danger=True,
+                   command=self._clear_all).pack(side="right")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  DATA REFRESH
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _refresh(self):
+        self._refresh_dashboard()
+        self._refresh_table()
+
+    def _refresh_dashboard(self):
+        dnes = datetime.date.today()
+        tyden = get_week_number(dnes)
+        records = self.db.fetch_by_week(tyden)
+
+        # Week badge
+        self.week_badge.config(
+            text=f"TÝ. {tyden:02d} · {dnes.year}"
         )
-        self.obed_check.pack(side="left", pady=(14, 0))
 
-    def _field_group(self, parent, label, width):
-        wrap = CTkFrame(parent, fg_color="transparent")
-        wrap.pack(side="left", padx=(0, 20))
-        CTkLabel(wrap, text=label, font=FONT_CAPTION, text_color=SUB).pack(anchor="w")
-        ent = CTkEntry(
-            wrap, width=width, height=32,
-            fg_color=CARD_DEEP, border_width=1, border_color=BORDER,
-            text_color=TEXT, corner_radius=8
-        )
-        ent.pack()
-        return ent
+        # Week analysis
+        ana = week_analysis(records, dnes)
+        skutecne = ana['skutecne_celkem']
+        zbyva    = ana['zbyva']
+        procenta = ana['procenta']
+        cas_p    = ana['cas_patek']
+        otevrene = ana['otevrene_dnes']
 
-    def _ted_btn(self, parent, target):
-        CTkButton(
-            parent, text="NOW",
-            width=36, height=32,
-            font=CTkFont(family="Segoe UI Variable", size=9, weight="bold"),
-            fg_color="#1c1c21", hover_color=DARK_HOVER,
-            text_color=SUB, corner_radius=6,
-            command=lambda: self.nastav_cas(target)
-        ).pack(side="left", padx=(4, 0))
-
-    # ─────────────────────────────────────────────────────────
-    # HISTORY CARD  (table)
-    # ─────────────────────────────────────────────────────────
-    def create_history_card(self, parent):
-        card = CTkFrame(
-            parent, fg_color=CARD,
-            border_width=1, border_color=BORDER,
-            corner_radius=16
-        )
-        card.grid(row=1, column=0, sticky="nsew")
-        card.grid_rowconfigure(1, weight=1)
-        card.grid_columnconfigure(0, weight=1)
-
-        # ── card header
-        hdr = CTkFrame(card, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", padx=22, pady=(16, 10))
-
-        CTkLabel(
-            hdr, text="ZÁZNAMY",
-            font=CTkFont(family="Segoe UI Variable", size=11, weight="bold"),
-            text_color=ACCENT
-        ).pack(side="left")
-
-        # right-side controls
-        ctrl = CTkFrame(hdr, fg_color="transparent")
-        ctrl.pack(side="right")
-
-        CTkLabel(ctrl, text="Týden", font=FONT_CAPTION, text_color=SUB
-                 ).pack(side="left", padx=(0, 6))
-
-        self.combo_tyden = CTkComboBox(
-            ctrl,
-            values=["Aktuální týden", "Všechny záznamy"],
-            width=154, height=28,
-            font=FONT_LABEL,
-            fg_color=CARD_DEEP, border_color=BORDER,
-            button_color=CARD_DEEP, button_hover_color=DARK_HOVER,
-            dropdown_fg_color=CARD_DEEP, dropdown_hover_color=DARK_HOVER,
-            text_color=TEXT
-        )
-        self.combo_tyden.pack(side="left")
-        self.combo_tyden.set("Aktuální týden")
-        self.combo_tyden.bind("<<ComboboxSelected>>", lambda e: self.obnovit_data())
-
-        CTkButton(
-            ctrl, text="SMAZAT",
-            font=CTkFont(family="Segoe UI Variable", size=10, weight="bold"),
-            width=72, height=28,
-            fg_color="transparent", text_color=RED_FG,
-            hover_color="#2a1515", corner_radius=6,
-            command=self.smazat
-        ).pack(side="left", padx=(10, 0))
-
-        # ── Treeview
-        tree_wrap = CTkFrame(card, fg_color="transparent")
-        tree_wrap.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 16))
-        tree_wrap.grid_rowconfigure(0, weight=1)
-        tree_wrap.grid_columnconfigure(0, weight=1)
-
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("PV.Treeview",
-            background=CARD, fieldbackground=CARD,
-            foreground=TEXT, rowheight=38,
-            borderwidth=0, font=FONT_TABLE
-        )
-        style.configure("PV.Treeview.Heading",
-            background="#1c1c21", foreground=SUB,
-            font=("Segoe UI Variable", 9, "bold"),
-            borderwidth=0, relief="flat", padding=(0, 6)
-        )
-        style.map("PV.Treeview",
-            background=[("selected", ACCENT)],
-            foreground=[("selected", "#ffffff")]
-        )
-        style.layout("PV.Treeview", [
-            ("PV.Treeview.treearea", {"sticky": "nsew"})
-        ])
-
-        columns = ("ID", "Týden", "Datum", "Příchod", "Odchod", "Čistý čas")
-        self.tree = ttk.Treeview(
-            tree_wrap, columns=columns, show="headings",
-            style="PV.Treeview", height=7
-        )
-
-        col_w = {"ID": 0, "Týden": 52, "Datum": 96, "Příchod": 72,
-                 "Odchod": 110, "Čistý čas": 90}
-        for col in columns:
-            self.tree.heading(col, text=col.upper())
-            self.tree.column(col, width=col_w[col], anchor="center",
-                             minwidth=col_w[col])
-
-        self.tree.column("ID", stretch=False)
-
-        self.tree.tag_configure("odd",     background=CARD)
-        self.tree.tag_configure("even",    background="#141417")
-        self.tree.tag_configure("working", background=GREEN_BG,
-                                foreground=GREEN_FG,
-                                font=("Segoe UI Variable", 10, "bold"))
-
-        vsb = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-
-        self.tree.bind("<<TreeviewSelect>>",          self.nacist_do_editace)
-        self.tree.bind("<ButtonRelease-1>", self.zrusit_vyber_pri_kliknuti_mimo)
-
-    # ═════════════════════════════════════════════════════════
-    # BUSINESS LOGIC  (unchanged from original)
-    # ═════════════════════════════════════════════════════════
-
-    def minimalizuj_do_tray(self):
-        self.root.withdraw()
-        if TRAY_DOSTUPNY:
-            self.tray.hide_window()
-
-    def zobraz_okno(self):
-        self.root.deiconify()
-        if TRAY_DOSTUPNY:
-            self.tray.show_window()
-
-    def ukoncit_aplikaci(self):
-        if TRAY_DOSTUPNY:
-            self.tray.stop()
-        self.root.quit()
-        sys.exit(0)
-
-    def nacti_tydny_do_filtru(self):
-        tydny = self.db.fetch_distinct_weeks()
-        self.combo_tyden.configure(
-            values=["Aktuální týden", "Všechny záznamy"] + [str(t) for t in tydny]
-        )
-
-    def reset_form(self):
-        self.edit_id = None
-        self.ent_datum.delete(0, tk.END)
-        self.ent_datum.insert(0, datetime.now().strftime("%Y-%m-%d"))
-        self.ent_prichod.delete(0, tk.END)
-        self.ent_odchod.delete(0, tk.END)
-        self.btn_ulozit.configure(text="ULOŽIT ZÁZNAM")
-
-    def nastav_cas(self, entry_field):
-        entry_field.delete(0, tk.END)
-        entry_field.insert(0, datetime.now().strftime("%H:%M"))
-
-    def ulozit(self):
-        d = self.ent_datum.get()
-        p = self.ent_prichod.get()
-        o = self.ent_odchod.get() or None
-        obed = 1 if self.var_obed.get() else 0
-        try:
-            dt_obj = datetime.strptime(d, "%Y-%m-%d")
-            tyden  = dt_obj.isocalendar()[1]
-            if self.edit_id:
-                self.db.update(self.edit_id, d, p, o, obed, tyden)
-            else:
-                self.db.insert(d, p, o, obed, tyden)
-            self.nacti_tydny_do_filtru()
-            self.reset_form()
-            self.obnovit_data()
-        except Exception:
-            messagebox.showerror("Chyba", "Špatný formát času nebo data!")
-
-    def smazat(self):
-        sel = self.tree.selection()
-        if not sel:
-            return
-        id_db = self.tree.item(sel[0])["values"][0]
-        self.db.delete(id_db)
-        self.obnovit_data()
-
-    def nacist_do_editace(self, event):
-        sel = self.tree.selection()
-        if not sel:
-            return
-        item   = self.tree.item(sel[0])["values"]
-        self.edit_id = item[0]
-        zaznam = self.db.fetch_by_id(self.edit_id)
-        if zaznam:
-            self.ent_datum.delete(0, tk.END);  self.ent_datum.insert(0,  zaznam[2])
-            self.ent_prichod.delete(0, tk.END);self.ent_prichod.insert(0, zaznam[3])
-            self.ent_odchod.delete(0, tk.END)
-            if zaznam[4]:
-                self.ent_odchod.insert(0, zaznam[4])
-            self.var_obed.set(bool(zaznam[6]))
-            self.btn_ulozit.configure(text="AKTUALIZOVAT")
-
-    def zrusit_vyber_pri_kliknuti_mimo(self, event):
-        region = self.tree.identify_region(event.x, event.y)
-        if region == "nothing":
-            self.tree.selection_remove(self.tree.selection())
-            self.reset_form()
-
-    def periodicka_aktualizace(self):
-        self.obnovit_data()
-        self.root.after(60000, self.periodicka_aktualizace)
-
-    def obnovit_data(self):
-        for i in self.tree.get_children():
-            self.tree.delete(i)
-
-        filtr = self.combo_tyden.get()
-        dnes  = datetime.now().date()
-
-        if filtr == "Aktuální týden":
-            hledany_tyden = dnes.isocalendar()[1]
-            rows          = self.db.fetch_by_week(hledany_tyden)
-            vsechny_tyden = rows
-        elif filtr == "Všechny záznamy":
-            rows          = self.db.fetch_all()
-            vsechny_tyden = []
+        # Prediction
+        pred_day = "DNES" if (dnes.weekday() == 4 or otevrene) else "PÁTEK"
+        self.pred_day_lbl.config(text=pred_day)
+        self.pred_time_lbl.config(text=cas_p)
+        if cas_p == "✓ Hotovo":
+            sub = "Týdenní fond splněn!"
+            self.pred_time_lbl.config(fg=C["green"])
+        elif cas_p == "NESTÍHÁŠ!":
+            sub = "Fond nesplnitelný dnes"
+            self.pred_time_lbl.config(fg=C["red"])
         else:
-            hledany_tyden = int(filtr)
-            rows          = self.db.fetch_by_week(hledany_tyden)
-            vsechny_tyden = rows
+            sub = f"Plánovaný odchod pro splnění {config.TYDENNI_FOND_HODIN}h fondu"
+            self.pred_time_lbl.config(fg=C["text"])
+        self.pred_sub_lbl.config(text=sub)
 
-        for idx, r in enumerate(rows):
-            vals = list(r)
-            tag  = "even" if idx % 2 == 0 else "odd"
-            if not r[4]:
-                vals[4] = "V PRÁCI"
-                vals[5] = "--"
-                tag     = "working"
-            else:
-                vals[5] = formatuj_minuty(r[5])
-            self.tree.insert("", tk.END, values=vals, tags=(tag,))
+        # Progress
+        self.prog_pct_lbl.config(text=f"{procenta}%")
+        self.prog_bar.set(procenta)
+        self.prog_done_lbl.config(text=f"{formatuj_minuty(skutecne)} odpracováno")
+        self.prog_left_lbl.config(text=f"{formatuj_minuty(zbyva)} zbývá")
 
-        if filtr == "Aktuální týden" and vsechny_tyden:
-            wd = calculator.week_analysis(vsechny_tyden, dnes)
-            self.hero_label.configure(text=wd["cas_patek"])
-            self.progress.set(wd["procenta"] / 100)
-            self.lbl_percent.configure(text=f"{wd['procenta']} %")
-            self.stat_odpracováno_value.configure(text=formatuj_minuty(wd["skutecne_celkem"]))
-            self.stat_zbývá_value.configure(text=formatuj_minuty(wd["zbyva"]))
+        # Week days mini display
+        for w in self.week_days_frame.winfo_children():
+            w.destroy()
 
-            mesic_str  = dnes.strftime("%Y-%m")
-            mesic_data = self.db.fetch_by_month(mesic_str)
-            balance    = calculator.month_balance(mesic_data, dnes)
-            sign       = "+" if balance >= 0 else ""
-            self.stat_bilance_value.configure(
-                text=f"{sign}{formatuj_minuty(abs(balance))}",
-                text_color=GREEN_FG if balance >= 0 else RED_FG
+        from collections import defaultdict
+        denni = defaultdict(int)
+        for r in records:
+            denni[r[2]] += r[5] or 0
+
+        start = dnes - datetime.timedelta(days=dnes.weekday())
+        day_labels = ["Po", "Út", "St", "Čt", "Pá"]
+        for i, dl in enumerate(day_labels):
+            d = start + datetime.timedelta(days=i)
+            ds = d.strftime("%Y-%m-%d")
+            mins = denni.get(ds, 0)
+            color = C["accent2"] if d == dnes else (C["text"] if d < dnes else C["muted"])
+            txt = f"{dl}: {formatuj_minuty(mins)}" if mins else f"{dl}: --"
+            tk.Label(self.week_days_frame, text=txt, bg=C["panel"],
+                     fg=color, font=FONT_SMALL).pack(side="left", padx=(0, 16))
+
+        # Stats
+        self.stat_celkem.config(text=formatuj_minuty(skutecne))
+        self.stat_zbyva.config(text=formatuj_minuty(zbyva))
+
+        # Month balance
+        month_str = dnes.strftime("%Y-%m")
+        month_recs = self.db.fetch_by_month(month_str)
+        bil = month_balance(month_recs, dnes)
+        sign = "+" if bil >= 0 else ""
+        self.stat_bilance.config(
+            text=f"{sign}{formatuj_minuty(abs(bil))}",
+            fg=C["green"] if bil > 0 else (C["red"] if bil < 0 else C["text"])
+        )
+
+    def _refresh_table(self):
+        # Update week filter combobox
+        weeks = self.db.fetch_distinct_weeks()
+        options = ["Vše"] + [f"Týden {w}" for w in weeks]
+        self.week_combo["values"] = options
+        cur = self.week_filter_var.get()
+        if cur not in options:
+            self.week_filter_var.set("Vše")
+
+        # Fetch data
+        sel = self.week_filter_var.get()
+        if sel == "Vše":
+            data = self.db.fetch_all()
+        else:
+            w = int(sel.split()[-1])
+            data = self.db.fetch_by_week(w)
+
+        # Populate tree
+        self.tree.delete(*self.tree.get_children())
+        for i, r in enumerate(data):
+            # r: id, tyden, datum, prichod, odchod, minut, obed
+            odchod_txt = r[4] if r[4] else "---"
+            minut_txt  = formatuj_minuty(r[5]) if r[5] else "--"
+            tag = "open" if not r[4] else ("even" if i % 2 else "")
+            iid = self.tree.insert("", "end",
+                iid=str(r[0]),
+                values=(f"#{r[0]}", r[1], r[2], r[3] or "--",
+                        odchod_txt, minut_txt),
+                tags=(tag,)
             )
-        else:
-            self.hero_label.configure(text="--:--")
-            self.progress.set(0)
-            self.lbl_percent.configure(text="0 %")
-            self.stat_odpracováno_value.configure(text="--")
-            self.stat_zbývá_value.configure(text="--")
-            self.stat_bilance_value.configure(text="--", text_color=TEXT)
 
-    def check_boot_time_and_record(self):
+        # Re-select if still exists
+        if self.selected_id:
+            try:
+                self.tree.selection_set(str(self.selected_id))
+                self.tree.see(str(self.selected_id))
+            except Exception:
+                self._clear_form()
+
+    def _refresh_history(self):
+        months = self.db.fetch_months_for_export()
+        month_strs = [f"{r[0]}-{r[1]}" for r in months]
+        options = ["Všechny měsíce"] + month_strs
+        self.month_combo["values"] = options
+        cur = self.month_filter_var.get()
+        if cur not in options:
+            self.month_filter_var.set("Všechny měsíce")
+
+        sel = self.month_filter_var.get()
+        if sel == "Všechny měsíce":
+            data = self.db.fetch_all()
+        else:
+            data = []
+            all_data = self.db.fetch_all()
+            data = [r for r in all_data if r[2].startswith(sel)]
+
+        self.hist_count_lbl.config(text=f"{len(data)} záznamů")
+        self.hist_tree.delete(*self.hist_tree.get_children())
+        for i, r in enumerate(sorted(data, key=lambda x: x[2], reverse=True)):
+            d = datetime.datetime.strptime(r[2], "%Y-%m-%d").date()
+            tag = "open" if not r[4] else ("even" if i % 2 else "")
+            self.hist_tree.insert("", "end",
+                values=(f"#{r[0]}", r[1], r[2], day_name_cs(d),
+                        r[3] or "--", r[4] or "---",
+                        "✓" if r[6] else "–",
+                        formatuj_minuty(r[5]) if r[5] else "--"),
+                tags=(tag,)
+            )
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  FORM OPERATIONS
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _set_now(self, entry):
+        entry.delete(0, tk.END)
+        entry.insert(0, datetime.datetime.now().strftime("%H:%M"))
+
+    def _on_tree_select(self, event):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        self.selected_id = int(iid)
+        rec = self.db.fetch_by_id(self.selected_id)
+        if not rec:
+            return
+        # r: id, tyden, datum, prichod, odchod, minut, obed
+        self.e_datum.delete(0, tk.END)
+        self.e_datum.insert(0, rec[2])
+        self.e_prichod.delete(0, tk.END)
+        self.e_prichod.insert(0, rec[3] or "")
+        self.e_odchod.delete(0, tk.END)
+        self.e_odchod.insert(0, rec[4] or "")
+        self.obed_var.set(bool(rec[6]))
+        self.save_btn.config(text="✎  Aktualizovat")
+        self.delete_btn.config(state="normal")
+
+    def _clear_form(self):
+        self.selected_id = None
+        self.e_datum.delete(0, tk.END)
+        self.e_datum.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
+        self.e_prichod.delete(0, tk.END)
+        self.e_odchod.delete(0, tk.END)
+        self.obed_var.set(True)
+        self.save_btn.config(text="⊕  Uložit záznam")
+        self.delete_btn.config(state="disabled")
+        self.tree.selection_remove(self.tree.selection())
+
+    def _save_record(self):
+        datum   = self.e_datum.get().strip()
+        prichod = self.e_prichod.get().strip()
+        odchod  = self.e_odchod.get().strip() or None
+        obed    = 1 if self.obed_var.get() else 0
+
+        if not datum or not prichod:
+            self._toast("Vyplňte datum a čas příchodu", error=True)
+            return
+
         try:
-            boot_dt = datetime.fromtimestamp(psutil.boot_time())
-            dnes, cas = boot_dt.strftime("%Y-%m-%d"), boot_dt.strftime("%H:%M")
-            with self.db._connect() as conn:
-                exists = conn.execute(
-                    "SELECT id FROM dochazka WHERE datum=?", (dnes,)
-                ).fetchone()
-            if not exists:
-                self.ent_datum.delete(0, tk.END);  self.ent_datum.insert(0, dnes)
-                self.ent_prichod.delete(0, tk.END);self.ent_prichod.insert(0, cas)
-                self.ulozit()
-                messagebox.showinfo("Auto-zápis", f"Start PC detekován v {cas}")
-            else:
-                self.obnovit_data()
+            datetime.datetime.strptime(datum, "%Y-%m-%d")
+        except ValueError:
+            self._toast("Neplatný formát data (YYYY-MM-DD)", error=True)
+            return
+
+        tyden = get_week_number(datetime.datetime.strptime(datum, "%Y-%m-%d").date())
+
+        if self.selected_id is not None:
+            self.db.update(self.selected_id, datum, prichod, odchod, obed, tyden)
+            self._toast("Záznam aktualizován")
+        else:
+            self.db.insert(datum, prichod, odchod, obed, tyden)
+            self._toast("Záznam uložen")
+
+        self._clear_form()
+        self._refresh()
+
+    def _confirm_delete(self):
+        if self.selected_id is None:
+            return
+        rec = self.db.fetch_by_id(self.selected_id)
+        if not rec:
+            return
+        if messagebox.askyesno(
+            "Smazat záznam",
+            f"Opravdu smazat záznam #{rec[0]}?\n{rec[2]} · {rec[3]} → {rec[4] or '---'}\n\nTuto akci nelze vrátit.",
+            parent=self
+        ):
+            self.db.delete(self.selected_id)
+            self._clear_form()
+            self._refresh()
+            self._toast("Záznam smazán")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  EXPORT
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _export_csv(self):
+        months_raw = self.db.fetch_months_for_export()
+        if not months_raw:
+            self._toast("Žádná data k exportu", error=True)
+            return
+
+        # Dialog for month selection
+        dialog = tk.Toplevel(self)
+        dialog.title("Export CSV")
+        dialog.configure(bg=C["bg"])
+        dialog.geometry("340x320")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        set_dark_title_bar(dialog)
+
+        tk.Label(dialog, text="Vyberte měsíce pro export:",
+                 bg=C["bg"], fg=C["text"], font=FONT_MONO).pack(
+            anchor="w", padx=20, pady=(16, 8))
+
+        list_frame = tk.Frame(dialog, bg=C["bg"])
+        list_frame.pack(fill="both", expand=True, padx=20)
+
+        vars_ = []
+        for rok, mesic in months_raw:
+            v = tk.BooleanVar(value=True)
+            vars_.append((v, f"{rok}-{mesic}"))
+            cb = tk.Checkbutton(list_frame, text=f"{rok}-{mesic}",
+                                variable=v, bg=C["bg"], fg=C["text"],
+                                selectcolor=C["accent"],
+                                activebackground=C["bg"],
+                                font=FONT_MONO_S, bd=0,
+                                highlightthickness=0, cursor="hand2")
+            cb.pack(anchor="w", pady=2)
+
+        def do_export():
+            selected = [m for v, m in vars_ if v.get()]
+            if not selected:
+                return
+            path = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV soubory", "*.csv"), ("Všechny soubory", "*.*")],
+                initialfile=f"dochazka_export.csv",
+                parent=dialog
+            )
+            if not path:
+                return
+            data = self.db.fetch_for_export(selected)
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(["Datum", "Den", "Příchod", "Odchod"])
+                for row in data:
+                    d = datetime.datetime.strptime(row[0], "%Y-%m-%d").date()
+                    w.writerow([row[0], day_name_cs(d), row[1], row[2] or ""])
+            dialog.destroy()
+            self._toast(f"Exportováno {len(data)} záznamů")
+
+        DarkButton(dialog, text="↓  Exportovat CSV", accent=True,
+                   command=do_export).pack(padx=20, pady=14, fill="x")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  SETTINGS
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _apply_settings(self, event=None):
+        try:
+            config.TYDENNI_FOND_HODIN = int(self.set_fond.get())
+        except ValueError:
+            pass
+        try:
+            config.OBED_MINUT = int(self.set_obed.get())
+        except ValueError:
+            pass
+        p = self.set_prichod.get().strip()
+        if p:
+            config.STANDARDNI_PRICHOD = p
+        o = self.set_odchod.get().strip()
+        if o:
+            config.STANDARDNI_ODCHOD = o
+        self._refresh_dashboard()
+        self._toast("Nastavení uloženo")
+
+    def _clear_all(self):
+        if messagebox.askyesno(
+            "Smazat všechna data",
+            "Opravdu smazat VŠECHNA data z databáze?\n\nTuto akci nelze vrátit!",
+            parent=self
+        ):
+            import sqlite3
+            with sqlite3.connect(self.db.db_path) as conn:
+                conn.execute("DELETE FROM dochazka")
+            self._clear_form()
+            self._refresh()
+            self._toast("Všechna data smazána")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  AUTOMATICKÝ PŘÍCHOD / ODCHOD
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _auto_zapis_prichod(self):
+        dnes = datetime.date.today()
+        if dnes.weekday() >= 5:  # víkend
+            return
+        dnes_str = dnes.strftime("%Y-%m-%d")
+        tyden = get_week_number(dnes)
+
+        # Zjistit, zda dnes už existuje záznam
+        all_today = [r for r in self.db.fetch_by_week(tyden) if r[2] == dnes_str]
+        if all_today:
+            return  # už máme záznam pro dnešek
+
+        # Auto-příchod: zkusit načíst čas posledního zapnutí z event logu
+        prichod_time = None
+        try:
+            # Jednoduché přiblížení: příchod = teď (při spuštění aplikace)
+            prichod_time = datetime.datetime.now().strftime("%H:%M")
+            # Zkusit event log pro přesnější čas
+            offline_dt = get_last_system_offline_time()
+            if offline_dt:
+                # Odhadnout příchod jako čas posledního zapnutí
+                boot_str = offline_dt.strftime("%H:%M")
+                p_min = cas_na_minuty(boot_str)
+                if 300 <= p_min <= 720:  # 5:00–12:00 = rozumný příchod
+                    prichod_time = boot_str
         except Exception:
             pass
 
-    def export_s_vyberem_mesicu(self):
-        rows = self.db.fetch_months_for_export()
-        if not rows:
-            messagebox.showinfo("Info", "Databáze neobsahuje žádné záznamy.")
-            return
+        if prichod_time:
+            self.db.insert(dnes_str, prichod_time, None, 1, tyden)
+            self.after(500, lambda: self._toast(
+                f"Auto-příchod zaznamenán: {prichod_time}", error=False
+            ))
 
-        data = {}
-        for rok, mesic in rows:
-            data.setdefault(rok, []).append(mesic)
+    # ═════════════════════════════════════════════════════════════════════════
+    #  TRAY / CLOSE
+    # ═════════════════════════════════════════════════════════════════════════
 
-        nazvy = ["Leden","Únor","Březen","Duben","Květen","Červen",
-                 "Červenec","Srpen","Září","Říjen","Listopad","Prosinec"]
+    def zobraz_okno(self, icon=None, item=None):
+        self.after(0, self.deiconify)
+        self.after(0, self.lift)
 
-        top = ctk.CTkToplevel(self.root)
-        top.title("Export měsíců")
-        top.geometry("340x460")
-        top.resizable(False, False)
-        if sys.platform == "win32":
-            set_dark_title_bar(top)
+    def ukoncit_aplikaci(self, icon=None, item=None):
+        self.tray.stop()
+        self.destroy()
 
-        mf = CTkFrame(top, fg_color=BG, corner_radius=0)
-        mf.pack(fill="both", expand=True, padx=10, pady=10)
-
-        canvas = tk.Canvas(mf, bg=BG, highlightthickness=0)
-        sb     = tk.Scrollbar(mf, orient="vertical", command=canvas.yview)
-        sf     = tk.Frame(canvas, bg=BG)
-        sf.bind("<Configure>", lambda e: canvas.configure(
-            scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=sf, anchor="nw")
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-
-        self.export_vars = {}
-        for rok, mesice in data.items():
-            CTkLabel(sf, text=rok, font=FONT_VALUE,
-                     text_color=ACCENT, anchor="w"
-                     ).pack(fill="x", pady=(10, 2))
-            for m in mesice:
-                mframe = tk.Frame(sf, bg=BG)
-                mframe.pack(fill="x", padx=20)
-                var = tk.BooleanVar()
-                self.export_vars[(rok, m)] = var
-                tk.Checkbutton(
-                    mframe, text=nazvy[int(m)-1], variable=var,
-                    bg=BG, fg=TEXT, selectcolor=BG, font=FONT_TABLE, anchor="w"
-                ).pack(side="left")
-
-        bf = tk.Frame(mf, bg=BG)
-        bf.pack(fill="x", pady=(10, 0))
-
-        def select_all():
-            for v in self.export_vars.values():
-                v.set(True)
-
-        def do_export():
-            chosen = [f"{r}-{m}" for (r, m), v in self.export_vars.items() if v.get()]
-            if not chosen:
-                messagebox.showwarning("Varování", "Není vybrán žádný měsíc.")
-                return
-            self.proved_export(chosen)
-            top.destroy()
-
-        for txt, cmd in [("Vybrat vše", select_all),
-                          ("Exportovat", do_export),
-                          ("Storno",     top.destroy)]:
-            CTkButton(bf, text=txt, command=cmd,
-                      fg_color=ACCENT if txt == "Exportovat" else "transparent",
-                      hover_color=ACCENT_HOVER if txt == "Exportovat" else DARK_HOVER
-                      ).pack(side="left", padx=5)
-
-    def proved_export(self, mesice):
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV", "*.csv")],
-            title="Uložit CSV jako"
-        )
-        if not path:
-            return
-        try:
-            data = self.db.fetch_for_export(mesice)
-            with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                w = csv.writer(f, delimiter=";")
-                w.writerow(["Datum", "Příchod", "Odchod"])
-                w.writerows(data)
-            messagebox.showinfo("Hotovo", f"Export {len(data)} záznamů proběhl úspěšně!")
-        except Exception as e:
-            messagebox.showerror("Chyba", str(e))
-
-    def check_unfinished_shift(self):
-        try:
-            from eventlog import get_last_system_offline_time
-        except ImportError:
-            return
-
+    def _on_close(self):
+        # Auto-odchod: doplnit odchod na otevřený záznam
         open_rec = self.db.find_open_record()
-        if not open_rec:
-            return
-        rec_id, datum, prichod, obed = open_rec
-        if not prichod:
-            return
-        offline_dt = get_last_system_offline_time()
-        if not offline_dt:
-            return
-        try:
-            prichod_dt = datetime.strptime(f"{datum} {prichod}", "%Y-%m-%d %H:%M")
-        except Exception:
-            return
+        if open_rec:
+            now_str = datetime.datetime.now().strftime("%H:%M")
+            self.db.update_odchod(open_rec[0], now_str)
+        self.tray.stop()
+        self.destroy()
 
-        now = datetime.now()
-        if prichod_dt < offline_dt <= now:
-            offline_str = offline_dt.strftime("%H:%M")
-            self.db.update_odchod(rec_id, offline_str)
-            self.obnovit_data()
-            messagebox.showinfo(
-                "Automatické doplnění",
-                f"Poslední směna nebyla ukončena.\n"
-                f"Čas odchodu doplněn ze systému: {offline_str}"
-            )
+    # ═════════════════════════════════════════════════════════════════════════
+    #  TICK (live refresh)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _tick(self):
+        self._refresh_dashboard()
+        self.after(30_000, self._tick)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  TOAST
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _toast(self, msg, error=False):
+        if hasattr(self, "_toast_win") and self._toast_win.winfo_exists():
+            self._toast_win.destroy()
+
+        tw = tk.Toplevel(self)
+        tw.overrideredirect(True)
+        tw.attributes("-topmost", True)
+        tw.configure(bg=C["panel"])
+
+        # Position bottom-right of main window
+        self.update_idletasks()
+        x = self.winfo_x() + self.winfo_width() - 320
+        y = self.winfo_y() + self.winfo_height() - 70
+        tw.geometry(f"300x44+{x}+{y}")
+
+        bar_color = C["red"] if error else C["green"]
+        tk.Frame(tw, bg=bar_color, width=4).pack(side="left", fill="y")
+        tk.Label(tw, text=msg, bg=C["panel"], fg=C["text"],
+                 font=FONT_MONO_S, padx=12, pady=12).pack(side="left")
+
+        self._toast_win = tw
+        tw.after(2600, lambda: tw.destroy() if tw.winfo_exists() else None)
 
 
-# ══════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    try:
-        root = ctk.CTk()
-        app  = PatecniVestec(root)
-        root.mainloop()
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        input("Stiskni Enter pro ukončení…")
+    app = DochazkaApp()
+    app.mainloop()
