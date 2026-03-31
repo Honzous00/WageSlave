@@ -3,7 +3,7 @@ import config
 from config import get_db_path
 
 
-class DochazkaDB:
+class WageSlaveDB:
     def __init__(self):
         self.db_path = get_db_path()
         self._init_db()

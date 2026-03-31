@@ -52,21 +52,14 @@ def week_analysis(records, current_date):
                                 diff -= config.OBED_MINUT
                             skutecne_celkem += max(0, diff)
 
-                    # FIX: use actual elapsed time (ted) for planovane_do_dneska,
-                    # not the fixed STANDARDNI_ODCHOD. This ensures the Friday
-                    # prediction reflects overtime already worked today.
+                    # For planovane_do_dneska, always plan a full standard day
+                    # from actual arrival to standard departure. Using elapsed time
+                    # here causes the Friday prediction to explode mid-day because
+                    # the day appears massively "behind ideal" until it's complete.
                     if prichod:
-                        p_dt = datetime.combine(den, datetime.strptime(prichod, "%H:%M").time())
-                        if ted > p_dt:
-                            elapsed = int((ted - p_dt).total_seconds() / 60)
-                            if elapsed > 360 and obed:
-                                elapsed -= config.OBED_MINUT
-                            planovane_do_dneska += max(0, elapsed)
-                        else:
-                            # Haven't started yet — plan a standard day
-                            plan = (cas_na_minuty(config.STANDARDNI_ODCHOD) - cas_na_minuty(prichod)) \
-                                   - (config.OBED_MINUT if obed else 0)
-                            planovane_do_dneska += max(0, plan)
+                        plan = (cas_na_minuty(config.STANDARDNI_ODCHOD) - cas_na_minuty(prichod)) \
+                               - (config.OBED_MINUT if obed else 0)
+                        planovane_do_dneska += max(0, plan)
         else:
             if den == current_date:
                 planovane_do_dneska += 8 * 60
@@ -88,17 +81,27 @@ def week_analysis(records, current_date):
             if prichod:
                 prichod_min = cas_na_minuty(prichod)
                 odchod_min = prichod_min + zbyva + (config.OBED_MINUT if obed else 0)
+                # Odchod nikdy v minulosti — pokud je fond splněn, ukaž "teď"
+                now_min = ted.hour * 60 + ted.minute
+                odchod_min = max(odchod_min, now_min)
                 if odchod_min < 24 * 60:
-                    cas_patek = f"{int(odchod_min // 60):02d}:{int(odchod_min % 60):02d}"
+                    if zbyva == 0:
+                        cas_patek = f"Nyní ({int(odchod_min // 60):02d}:{int(odchod_min % 60):02d})"
+                    else:
+                        cas_patek = f"{int(odchod_min // 60):02d}:{int(odchod_min % 60):02d}"
                 else:
                     cas_patek = "NESTÍHÁŠ!"
             else:
                 cas_patek = "--:--"
     else:
         patkovy_fond = max(0, 8 * 60 - rozdil)
-        # FIX: only add lunch on Friday if the remaining work block is long enough
-        # to warrant a break (> 6 hours), matching the same threshold used elsewhere.
-        odchod_min = cas_na_minuty(config.STANDARDNI_PRICHOD) + patkovy_fond
+        # Use actual today's arrival as base if available, otherwise standard arrival.
+        # This ensures an early arrival reduces Friday's required end time correctly.
+        if otevrene_dnes and otevrene_dnes[3]:
+            patek_prichod = otevrene_dnes[3]
+        else:
+            patek_prichod = config.STANDARDNI_PRICHOD
+        odchod_min = cas_na_minuty(patek_prichod) + patkovy_fond
         if patkovy_fond > 360:
             odchod_min += config.OBED_MINUT
         if odchod_min < 24 * 60:
@@ -151,20 +154,27 @@ def month_balance(records, current_date):
                     # Still clocked in — estimate live time + planned remainder
                     r = otevrene_mesic[datum_str]
                     prichod = r[1]
+                    obed = r[4] if len(r) > 4 else 1
                     if prichod:
                         p_dt = datetime.combine(dnes, datetime.strptime(prichod, "%H:%M").time())
                         ted = datetime.now()
                         if ted > p_dt:
                             odpracovano = int((ted - p_dt).total_seconds() / 60)
-                            if odpracovano > 360:
+                            if odpracovano > 360 and obed:
                                 odpracovano -= config.OBED_MINUT
                             skutecne_a_planovane += max(0, odpracovano)
+                        # Remaining time until standard departure, adjusted for lunch.
+                        # If we haven't crossed 6h yet, lunch is still ahead of us —
+                        # subtract it from the remaining planned time so it isn't
+                        # counted twice (once now as "future work", once later when
+                        # odpracovano crosses the 6h threshold and deducts it).
                         ted_min = ted.hour * 60 + ted.minute
                         odchod_plan_min = cas_na_minuty(config.STANDARDNI_ODCHOD)
                         zbyva = max(0, odchod_plan_min - ted_min)
-                        if (ted - p_dt).total_seconds() / 60 <= 360:
-                            zbyva -= config.OBED_MINUT
-                        skutecne_a_planovane += max(0, zbyva)
+                        elapsed_raw = (ted - p_dt).total_seconds() / 60
+                        if elapsed_raw <= 360 and obed:
+                            zbyva = max(0, zbyva - config.OBED_MINUT)
+                        skutecne_a_planovane += zbyva
                 elif datum_str not in uzavrene_mesic:
                     # FIX: only add a planned full day if there is truly NO record
                     # at all for today (neither open nor closed). If a closed record
