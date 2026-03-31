@@ -1,9 +1,17 @@
-# Docházkový systém — závislosti
+# WageSlave System — závislosti
 # Instalace: pip install -r requirements.txt
 
-# Povinné (pro tray icon a ikonu)
-Pillow>=10.0.0
+# UI & ikony
+pillow>=10.0.0
+
+# Systémový tray
 pystray>=0.19.0
 
-# Volitelné (pro automatické načtení z Windows Event Logu)
-# pywin32>=306  # pouze Windows, odkomentujte pokud chcete auto-příchod z event logu
+# Windows API (event log, dark title bar)
+pywin32>=306
+
+# SVG renderer (bez systémových závislostí, čistý Rust binding)
+resvg-py>=0.2.0
+
+# Build nástroj (pouze pro kompilaci do .exe, není potřeba pro spuštění skriptu)
+pyinstaller>=6.0.0
