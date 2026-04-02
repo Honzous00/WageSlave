@@ -16,6 +16,7 @@ a = Analysis(
         ('config.py', '.'),
         ('database.py', '.'),
         ('calculator.py', '.'),
+        ('special_days.py', '.'),
         ('utils.py', '.'),
         ('eventlog.py', '.'),
     ],

@@ -15,7 +15,7 @@ LOGO_VARIANTA      = "money"  # purple | purple_neon | money | money_neon | slav
 def get_app_dir():
     """Vraci %APPDATA%/WageSlave, vytvori pokud neexistuje."""
     appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
-    d = os.path.join(appdata, "WageSlave")
+    d = os.path.join(appdata, "WageSlave_testing")
     os.makedirs(d, exist_ok=True)
     return d
 

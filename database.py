@@ -24,6 +24,15 @@ class WageSlaveDB:
                 conn.execute("ALTER TABLE dochazka ADD COLUMN obed INTEGER DEFAULT 1")
             except sqlite3.OperationalError:
                 pass
+            # Tabulka výjimečných dnů (svátky, dovolená, nemoc)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS special_days (
+                    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                    datum    TEXT NOT NULL UNIQUE,
+                    typ      TEXT NOT NULL,
+                    poznamka TEXT DEFAULT ''
+                )
+            """)
 
     def insert(self, datum, prichod, odchod, obed, tyden):
         with self._connect() as conn:

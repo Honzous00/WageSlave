@@ -24,6 +24,8 @@ from calculator import week_analysis, month_balance
 from utils import formatuj_minuty, cas_na_minuty, normalizuj_cas, set_dark_title_bar
 from tray import TrayIcon
 from eventlog import get_last_system_offline_time
+import special_days
+special_days.init_table()
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PALETA BAREV
@@ -45,14 +47,14 @@ C = {
     "sidebar":   "#0f1218",
 }
 
-FONT_MONO  = ("Consolas", 10)
-FONT_MONO_S = ("Consolas", 9)
-FONT_MONO_L = ("Consolas", 12, "bold")
+FONT_MONO  = ("Segoe UI", 10)
+FONT_MONO_S = ("Segoe UI", 9)
+FONT_MONO_L = ("Segoe UI", 12, "bold")
 FONT_HERO  = ("Segoe UI", 42, "bold")
 FONT_H1    = ("Segoe UI", 16, "bold")
 FONT_H2    = ("Segoe UI", 12, "bold")
 FONT_LABEL = ("Segoe UI", 8)
-FONT_SMALL = ("Consolas", 8)
+FONT_SMALL = ("Segoe UI", 8)
 
 
 def get_week_number(date):
@@ -191,7 +193,7 @@ class LiveBadge(tk.Frame):
                             font=("Segoe UI", 7))
         self.dot.pack(side="left", anchor="center")
         tk.Label(self, text="LIVE", fg=C["green"], bg=C["surface"],
-                 font=("Consolas", 8, "bold")).pack(side="left", padx=(2, 0), anchor="center")
+                 font=("Segoe UI", 8, "bold")).pack(side="left", padx=(2, 0), anchor="center")
         self._blink_state = True
         self._blink()
 
@@ -428,7 +430,7 @@ class WageSlaveApp(tk.Tk):
             background=C["surface"],
             foreground=C["muted"],
             borderwidth=0,
-            font=("Consolas", 8, "bold"),
+            font=("Segoe UI", 8, "bold"),
             relief="flat",
         )
         style.map("Dark.Treeview",
@@ -488,6 +490,7 @@ class WageSlaveApp(tk.Tk):
 
         self._build_page_dashboard()
         self._build_page_history()
+        self._build_page_planning()
         self._build_page_settings()
 
         self._show_page("dashboard")
@@ -525,6 +528,7 @@ class WageSlaveApp(tk.Tk):
         nav_items = [
             ("dashboard", "  Dashboard"),
             ("history",   "  Historie"),
+            ("planning",  "  Plánování"),
             ("settings",  "  Nastavení"),
         ]
         for key, txt in nav_items:
@@ -577,7 +581,7 @@ class WageSlaveApp(tk.Tk):
             self._brand_logo_lbl = EmojiLabel(bottom_frame, "🕐", size=32, bg=C["sidebar"])
             self._brand_logo_lbl.pack(anchor="w")
         tk.Label(bottom_frame, text="v2.0.0 · 2026", bg=C["sidebar"],
-                 fg=C["muted"], font=("Consolas", 8),
+                 fg=C["muted"], font=("Segoe UI", 8),
                  anchor="w").pack(fill="x", pady=(4, 0))
 
     # ── TOPBAR ────────────────────────────────────────────────────────────────
@@ -601,7 +605,7 @@ class WageSlaveApp(tk.Tk):
 
         self.week_badge = tk.Label(right, text="TÝ. 00 · 2025",
                                    bg=C["border"], fg=C["muted"],
-                                   font=("Consolas", 8),
+                                   font=("Segoe UI", 8),
                                    padx=10, pady=4, relief="flat")
         self.week_badge.pack(side="right")
 
@@ -612,7 +616,7 @@ class WageSlaveApp(tk.Tk):
             frame.pack_forget()
         self._pages[name].pack(fill="both", expand=True)
 
-        titles = {"dashboard": "Dashboard", "history": "Historie", "settings": "Nastavení"}
+        titles = {"dashboard": "Dashboard", "history": "Historie", "settings": "Nastavení", "planning": "Plánování"}
         self.topbar_title.config(text=titles.get(name, name))
 
         for key, btn in self._nav_btns.items():
@@ -626,6 +630,8 @@ class WageSlaveApp(tk.Tk):
             self._refresh_history()
         elif name == "dashboard":
             self._refresh()
+        elif name == "planning":
+            self._refresh_planning()
 
     # ═════════════════════════════════════════════════════════════════════════
     #  DASHBOARD PAGE
@@ -680,7 +686,7 @@ class WageSlaveApp(tk.Tk):
                  anchor="w").pack(fill="x")
 
         self.pred_day_lbl = tk.Label(card, text="PÁTEK", bg=C["panel"],
-                                     fg=C["accent2"], font=("Consolas", 9),
+                                     fg=C["accent2"], font=("Segoe UI", 9),
                                      anchor="w")
         self.pred_day_lbl.pack(fill="x", pady=(2, 0))
 
@@ -787,14 +793,14 @@ class WageSlaveApp(tk.Tk):
 
         # Datum
         tk.Label(card, text="DATUM", bg=C["panel"], fg=C["muted"],
-                 font=("Consolas", 7), anchor="w").pack(fill="x")
+                 font=("Segoe UI", 7), anchor="w").pack(fill="x")
         self.e_datum = DarkEntry(card)
         self.e_datum.pack(fill="x", pady=(3, 8), ipady=5)
         self.e_datum.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
 
         # Příchod
         tk.Label(card, text="PŘÍCHOD", bg=C["panel"], fg=C["muted"],
-                 font=("Consolas", 7), anchor="w").pack(fill="x")
+                 font=("Segoe UI", 7), anchor="w").pack(fill="x")
         pr_row = tk.Frame(card, bg=C["panel"])
         pr_row.pack(fill="x", pady=(3, 8))
         pr_row.bind("<Button-1>", lambda e: self._clear_form())
@@ -808,7 +814,7 @@ class WageSlaveApp(tk.Tk):
 
         # Odchod
         tk.Label(card, text="ODCHOD", bg=C["panel"], fg=C["muted"],
-                 font=("Consolas", 7), anchor="w").pack(fill="x")
+                 font=("Segoe UI", 7), anchor="w").pack(fill="x")
         od_row = tk.Frame(card, bg=C["panel"])
         od_row.pack(fill="x", pady=(3, 8))
         od_row.bind("<Button-1>", lambda e: self._clear_form())
@@ -952,6 +958,346 @@ class WageSlaveApp(tk.Tk):
 
         self.hist_tree.tag_configure("open", foreground=C["amber"])
         self.hist_tree.tag_configure("even", background=C["surface"])
+
+    # ═════════════════════════════════════════════════════════════════════════
+    #  PLANNING PAGE — Svátky / Dovolená / Nemocenská
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _build_page_planning(self):
+        page = tk.Frame(self.content, bg=C["bg"])
+        self._pages["planning"] = page
+
+        pad = tk.Frame(page, bg=C["bg"])
+        pad.pack(fill="both", expand=True, padx=20, pady=16)
+
+        # ── Horní toolbar
+        toolbar = tk.Frame(pad, bg=C["bg"])
+        toolbar.pack(fill="x", pady=(0, 12))
+
+        self._plan_month_var = tk.StringVar()
+        self._plan_month_var.set(datetime.date.today().strftime("%Y-%m"))
+
+        nav_l = DarkButton(toolbar, text="◀", ghost=True, padx=8, pady=4,
+                           command=self._plan_prev_month)
+        nav_l.pack(side="left")
+
+        self._plan_month_lbl = tk.Label(toolbar, text="", bg=C["bg"],
+                                        fg=C["text"], font=FONT_H2, width=16)
+        self._plan_month_lbl.pack(side="left", padx=8)
+
+        nav_r = DarkButton(toolbar, text="▶", ghost=True, padx=8, pady=4,
+                           command=self._plan_next_month)
+        nav_r.pack(side="left")
+
+        DarkButton(toolbar, text="⬇  Stáhnout svátky CZ",
+                   command=self._plan_import_holidays,
+                   padx=12, pady=4).pack(side="right")
+
+        # ── Dvousloupcový layout: kalendář + panel pro editaci
+        body = tk.Frame(pad, bg=C["bg"])
+        body.pack(fill="both", expand=True)
+
+        # Levý sloupec — kalendář
+        cal_frame = tk.Frame(body, bg=C["panel"], padx=16, pady=16)
+        cal_frame.pack(side="left", fill="both", expand=True)
+        self._plan_cal_frame = cal_frame
+
+        # Pravý sloupec — přidání záznamu
+        right = tk.Frame(body, bg=C["bg"], width=280)
+        right.pack(side="right", fill="y", padx=(12, 0))
+        right.pack_propagate(False)
+
+        # Karta přidání
+        add_card = tk.Frame(right, bg=C["panel"], padx=18, pady=16)
+        add_card.pack(fill="x")
+
+        tk.Label(add_card, text="NOVÝ ZÁZNAM", bg=C["panel"],
+                 fg=C["muted"], font=("Segoe UI", 9, "bold"),
+                 anchor="w").pack(fill="x")
+        Separator(add_card).pack(fill="x", pady=8)
+
+        tk.Label(add_card, text="DATUM", bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI", 7), anchor="w").pack(fill="x")
+        self._plan_datum = DarkEntry(add_card)
+        self._plan_datum.pack(fill="x", pady=(3, 8), ipady=5)
+        self._plan_datum.insert(0, datetime.date.today().strftime("%Y-%m-%d"))
+
+        tk.Label(add_card, text="TYP", bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI", 7), anchor="w").pack(fill="x")
+        self._plan_typ_var = tk.StringVar(value="holiday")
+        for key, label in special_days.TYPES.items():
+            color = special_days.TYPE_COLORS[key]
+            rb = tk.Radiobutton(
+                add_card,
+                text=f"  {special_days.TYPE_EMOJI[key]}  {label}",
+                variable=self._plan_typ_var,
+                value=key,
+                bg=C["panel"], fg=C["text"],
+                selectcolor=C["bg"],
+                activebackground=C["panel"],
+                activeforeground=color,
+                font=FONT_MONO_S,
+                bd=0, highlightthickness=0,
+                cursor="hand2",
+            )
+            rb.pack(anchor="w", pady=2)
+
+        tk.Label(add_card, text="POZNÁMKA (volitelné)", bg=C["panel"], fg=C["muted"],
+                 font=("Segoe UI", 7), anchor="w").pack(fill="x", pady=(8, 0))
+        self._plan_poznamka = DarkEntry(add_card)
+        self._plan_poznamka.pack(fill="x", pady=(3, 8), ipady=4)
+
+        DarkButton(add_card, text="Uložit", accent=True,
+                   command=self._plan_save).pack(fill="x")
+        DarkButton(add_card, text="Smazat vybraný den", danger=True,
+                   command=self._plan_delete).pack(fill="x", pady=(4, 0))
+
+        # Karta legenda
+        leg_card = tk.Frame(right, bg=C["panel"], padx=18, pady=14)
+        leg_card.pack(fill="x", pady=(12, 0))
+        tk.Label(leg_card, text="LEGENDA", bg=C["panel"],
+                 fg=C["muted"], font=("Segoe UI", 9, "bold"),
+                 anchor="w").pack(fill="x")
+        Separator(leg_card).pack(fill="x", pady=6)
+        legend_items = [
+            ("holiday",  "Fond zachován, počítá se jako odpracovaný"),
+            ("vacation", "Fond zachován, počítá se jako odpracovaný"),
+            ("sick",     "Fond SNÍŽEN o 8h, den se nepočítá"),
+        ]
+        for typ, desc in legend_items:
+            row = tk.Frame(leg_card, bg=C["panel"])
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=f"{special_days.TYPE_EMOJI[typ]} {special_days.TYPES[typ]}",
+                     bg=C["panel"], fg=special_days.TYPE_COLORS[typ],
+                     font=FONT_MONO_S, anchor="w", width=16).pack(side="left")
+            tk.Label(row, text=desc, bg=C["panel"], fg=C["muted"],
+                     font=("Segoe UI", 7), anchor="w",
+                     wraplength=180, justify="left").pack(side="left")
+
+    def _plan_prev_month(self):
+        y, m = map(int, self._plan_month_var.get().split("-"))
+        m -= 1
+        if m < 1:
+            m = 12; y -= 1
+        self._plan_month_var.set(f"{y}-{m:02d}")
+        self._refresh_planning()
+
+    def _plan_next_month(self):
+        y, m = map(int, self._plan_month_var.get().split("-"))
+        m += 1
+        if m > 12:
+            m = 1; y += 1
+        self._plan_month_var.set(f"{y}-{m:02d}")
+        self._refresh_planning()
+
+    def _refresh_planning(self):
+        import calendar as cal_mod
+        month_str = self._plan_month_var.get()
+        y, m = map(int, month_str.split("-"))
+
+        mesice = ["Leden","Únor","Březen","Duben","Květen","Červen",
+                  "Červenec","Srpen","Září","Říjen","Listopad","Prosinec"]
+        self._plan_month_lbl.config(text=f"{mesice[m-1]} {y}")
+
+        days_data = special_days.fetch_month(month_str)
+        special_map = {r[0]: (r[1], r[2]) for r in days_data}
+
+        # Vymaž obsah
+        for w in self._plan_cal_frame.winfo_children():
+            w.destroy()
+
+        # Jeden grid frame — vše přes .grid(row, col)
+        gf = tk.Frame(self._plan_cal_frame, bg=C["panel"])
+        gf.pack(fill="both", expand=True)
+
+        # 7 sloupců stejné šířky
+        for col in range(7):
+            gf.columnconfigure(col, weight=1, uniform="cal")
+
+        # Hlavičky — řádek 0
+        day_names = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"]
+        for col, dn in enumerate(day_names):
+            tk.Label(gf, text=dn, bg=C["panel"], fg=C["muted"],
+                     font=("Segoe UI", 8, "bold"),
+                     anchor="center", pady=6).grid(row=0, column=col, sticky="nsew")
+
+        # Oddělovač — řádek 1
+        sep = tk.Frame(gf, bg=C["border"], height=1)
+        sep.grid(row=1, column=0, columnspan=7, sticky="ew", pady=(0, 4))
+
+        first_weekday, num_days = cal_mod.monthrange(y, m)
+        today = datetime.date.today()
+
+        for day_num in range(1, num_days + 1):
+            abs_pos  = first_weekday + day_num - 1
+            grid_row = 2 + abs_pos // 7
+            grid_col = abs_pos % 7
+
+            date_obj = datetime.date(y, m, day_num)
+            date_str = date_obj.strftime("%Y-%m-%d")
+            day_type = special_map.get(date_str, (None, ""))[0]
+            is_weekend = date_obj.weekday() >= 5
+            is_today   = (date_obj == today)
+
+            if is_today:
+                cell_bg = C["accent"]
+                cell_fg = C["white"]
+            elif day_type == "sick":
+                cell_bg = "#3d1a1a"
+                cell_fg = special_days.TYPE_COLORS["sick"]
+            elif day_type == "holiday":
+                cell_bg = "#3d2e0a"
+                cell_fg = special_days.TYPE_COLORS["holiday"]
+            elif day_type == "vacation":
+                cell_bg = "#0d2e1a"
+                cell_fg = special_days.TYPE_COLORS["vacation"]
+            elif is_weekend:
+                cell_bg = C["surface"]
+                cell_fg = C["muted"]
+            else:
+                cell_bg = C["panel"]
+                cell_fg = C["text"]
+
+            emoji = special_days.TYPE_EMOJI.get(day_type, "") if day_type else ""
+            label_text = f"{day_num}\n{emoji}" if emoji else str(day_num)
+
+            cell = tk.Label(
+                gf,
+                text=label_text,
+                bg=cell_bg, fg=cell_fg,
+                font=("Segoe UI", 10),
+                height=3,
+                relief="flat",
+                cursor="hand2" if not is_weekend else "arrow",
+                anchor="center",
+                justify="center",
+            )
+            cell.grid(row=grid_row, column=grid_col, sticky="nsew", padx=2, pady=2)
+
+            if not is_weekend:
+                def _on_click(e, ds=date_str):
+                    self._plan_datum.delete(0, tk.END)
+                    self._plan_datum.insert(0, ds)
+                    existing = special_days.get(ds)
+                    if existing:
+                        self._plan_typ_var.set(existing[1])
+                        self._plan_poznamka.delete(0, tk.END)
+                        self._plan_poznamka.insert(0, existing[2] or "")
+                    else:
+                        self._plan_poznamka.delete(0, tk.END)
+                cell.bind("<Button-1>", _on_click)
+                orig_bg = cell_bg
+                cell.bind("<Enter>", lambda e, w=cell: w.config(bg=C["border2"]))
+                cell.bind("<Leave>", lambda e, w=cell, bg=orig_bg: w.config(bg=bg))
+    def _plan_save(self):
+        datum = self._plan_datum.get().strip()
+        typ   = self._plan_typ_var.get()
+        pozn  = self._plan_poznamka.get().strip()
+        try:
+            datetime.datetime.strptime(datum, "%Y-%m-%d")
+        except ValueError:
+            self._toast("Neplatný formát data (YYYY-MM-DD)", error=True)
+            return
+        ok = special_days.upsert(datum, typ, pozn)
+        if ok:
+            self._toast(f"Uloženo: {datum} → {special_days.TYPES.get(typ, typ)}")
+            self._plan_month_var.set(datum[:7])
+            self._refresh_planning()
+            self._refresh_dashboard()
+        else:
+            self._toast("Chyba při ukládání", error=True)
+
+    def _plan_delete(self):
+        datum = self._plan_datum.get().strip()
+        existing = special_days.get(datum)
+        if not existing:
+            self._toast(f"Pro {datum} není žádný záznam", error=True)
+            return
+        if messagebox.askyesno(
+            "Smazat záznam",
+            f"Smazat záznam pro {datum}?\n({special_days.TYPES.get(existing[1], existing[1])})",
+            parent=self
+        ):
+            special_days.delete(datum)
+            self._toast(f"Smazáno: {datum}")
+            self._refresh_planning()
+            self._refresh_dashboard()
+
+    def _plan_import_holidays(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Stáhnout státní svátky")
+        dialog.configure(bg=C["bg"])
+        dialog.geometry("420x320")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        set_dark_title_bar(dialog)
+
+        tk.Label(dialog, text="Stáhnout české státní svátky",
+                 bg=C["bg"], fg=C["text"], font=FONT_H2).pack(
+            anchor="w", padx=24, pady=(20, 4))
+        tk.Label(
+            dialog,
+            text="Aplikace se pokusí stáhnout svátky z veřejného API.\n"
+                 "Pokud API není dostupné, použije vestavěný seznam svátků\n"
+                 "(pevná data + Velikonoce).\n\n"
+                 "Data budou uložena jako typ 'Státní svátek'.",
+            bg=C["bg"], fg=C["muted"], font=("Segoe UI", 9),
+            justify="left", wraplength=370
+        ).pack(anchor="w", padx=24, pady=(0, 12))
+
+        year_frame = tk.Frame(dialog, bg=C["bg"])
+        year_frame.pack(anchor="w", padx=24, pady=(0, 8))
+        tk.Label(year_frame, text="Rok:", bg=C["bg"], fg=C["text"],
+                 font=FONT_MONO).pack(side="left", padx=(0, 8))
+        year_var = tk.StringVar(value=str(datetime.date.today().year))
+        DarkEntry(year_frame, width=8, justify="center",
+                  textvariable=year_var).pack(side="left")
+
+        overwrite_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            dialog,
+            text="  Přepsat existující záznamy",
+            variable=overwrite_var,
+            bg=C["bg"], fg=C["muted"],
+            selectcolor=C["panel"],
+            activebackground=C["bg"],
+            font=FONT_MONO_S, bd=0,
+            highlightthickness=0, cursor="hand2"
+        ).pack(anchor="w", padx=24, pady=(0, 10))
+
+        result_lbl = tk.Label(dialog, text="", bg=C["bg"],
+                              fg=C["muted"], font=("Segoe UI", 8),
+                              wraplength=370, justify="left")
+        result_lbl.pack(anchor="w", padx=24)
+
+        btn_frame = tk.Frame(dialog, bg=C["bg"])
+        btn_frame.pack(side="bottom", fill="x", padx=24, pady=16)
+
+        def do_import():
+            try:
+                year = int(year_var.get())
+            except ValueError:
+                result_lbl.config(text="Neplatný rok.", fg=C["red"])
+                return
+            result_lbl.config(text="Stahování...", fg=C["muted"])
+            dialog.update()
+            try:
+                pridano, preskoceno, zdroj = special_days.import_holidays_from_api(
+                    year, overwrite=overwrite_var.get()
+                )
+                result_lbl.config(
+                    text=f"✓ Přidáno: {pridano}, přeskočeno: {preskoceno}\n{zdroj}",
+                    fg=C["green"]
+                )
+                self._refresh_planning()
+                self._refresh_dashboard()
+            except Exception as e:
+                result_lbl.config(text=f"Chyba: {e}", fg=C["red"])
+
+        DarkButton(btn_frame, text="⬇  Stáhnout", accent=True,
+                   command=do_import).pack(side="left")
+        DarkButton(btn_frame, text="Zavřít",
+                   command=dialog.destroy).pack(side="right")
 
     # ═════════════════════════════════════════════════════════════════════════
     #  SETTINGS PAGE
@@ -1170,12 +1516,25 @@ class WageSlaveApp(tk.Tk):
         cas_p    = ana['cas_patek']
         otevrene = ana['otevrene_dnes']
 
-        # Prediction
-        pred_day = "DNES" if (dnes.weekday() == 4 or otevrene) else "PÁTEK"
+        # Prediction — používá pred_label z kalkulátoru
+        pred_label = ana.get('pred_label', 'Pá')   # např. "Pá", "Čt (pá – svátek)"
+        pred_den   = ana.get('pred_den')            # date objekt
+
+        # Horní řádek: je to dnes nebo jiný den?
+        if pred_den == dnes:
+            pred_day = "DNES"
+        elif pred_den and pred_den.weekday() == 4:
+            pred_day = "PÁTEK"
+        else:
+            # Předchozí pracovní den (čtvrtek atd.)
+            pred_day = pred_label.split(" ")[0].upper() if pred_label else "PÁTEK"
         self.pred_day_lbl.config(text=pred_day)
-        # "Nyní (HH:MM)" — rozděl na label a čas zvlášť
-        if cas_p.startswith("Nyní ("):
-            time_part = cas_p[6:-1]  # "HH:MM"
+
+        if cas_p == "Volno":
+            self.pred_time_lbl.config(text="Volno", fg=C["green"])
+            sub = f"Volno — {pred_label}"
+        elif cas_p.startswith("Nyní ("):
+            time_part = cas_p[6:-1]
             self.pred_time_lbl.config(text=time_part, fg=C["green"])
             self.pred_day_lbl.config(text="TEĎ →")
             sub = "Fond splněn, můžeš odejít"
@@ -1187,14 +1546,20 @@ class WageSlaveApp(tk.Tk):
             sub = "Fond nesplnitelný dnes"
         else:
             self.pred_time_lbl.config(text=cas_p, fg=C["text"])
-            sub = f"Plánovaný odchod pro splnění {config.TYDENNI_FOND_HODIN}h fondu"
+            # Sub: "Plánovaný odchod v Čt (pá – svátek) · 40h fond"
+            sub = f"Odchod: {pred_label}  ·  {config.TYDENNI_FOND_HODIN}h fond"
         self.pred_sub_lbl.config(text=sub)
 
         # Progress
         self.prog_pct_lbl.config(text=f"{procenta}%")
         self.prog_bar.set(procenta)
         self.prog_done_lbl.config(text=f"{formatuj_minuty(skutecne)} odpracováno")
-        self.prog_left_lbl.config(text=f"{formatuj_minuty(zbyva)} zbývá")
+        celkem_fond     = ana.get('celkem_fond', config.TYDENNI_FOND_HODIN * 60)
+        reducing_count  = ana.get('fond_reducing_tyden', 0)
+        fond_label      = f"{formatuj_minuty(zbyva)} zbývá"
+        if reducing_count:
+            fond_label += f"  (fond –{reducing_count}d)"
+        self.prog_left_lbl.config(text=fond_label)
 
         # Week days mini display
         for w in self.week_days_frame.winfo_children():
@@ -1207,12 +1572,25 @@ class WageSlaveApp(tk.Tk):
 
         start = dnes - datetime.timedelta(days=dnes.weekday())
         day_labels = ["Po", "Út", "St", "Čt", "Pá"]
+        # Získej special days pro tento týden z výsledku week_analysis
+        week_special = ana.get('special', {})
         for i, dl in enumerate(day_labels):
             d = start + datetime.timedelta(days=i)
             ds = d.strftime("%Y-%m-%d")
+            day_type = week_special.get(d)
             mins = denni.get(ds, 0)
-            color = C["accent2"] if d == dnes else (C["text"] if d < dnes else C["muted"])
-            txt = f"{dl}: {formatuj_minuty(mins)}" if mins else f"{dl}: --"
+            if day_type == "sick":
+                txt = f"{dl}: 🤒"
+                color = C["red"]
+            elif day_type == "holiday":
+                txt = f"{dl}: 🎉"
+                color = C["amber"]
+            elif day_type == "vacation":
+                txt = f"{dl}: 🏖"
+                color = C["green"]
+            else:
+                color = C["accent2"] if d == dnes else (C["text"] if d < dnes else C["muted"])
+                txt = f"{dl}: {formatuj_minuty(mins)}" if mins else f"{dl}: --"
             tk.Label(self.week_days_frame, text=txt, bg=C["panel"],
                      fg=color, font=FONT_SMALL).pack(side="left", padx=(0, 16))
 
